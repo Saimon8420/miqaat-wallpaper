@@ -1,0 +1,9 @@
+{
+ "name": "miqaat-wallpaper-tools",
+ "private": true,
+ "type": "module",
+ "dependencies": {
+  "holy-quran": "1.0.4",
+  "quran-meta": "6.0.17"
+ }
+}
