@@ -1,0 +1,122 @@
+[
+ {
+  "id": "kaaba",
+  "name": "Kaaba",
+  "credit": "Richard Mortel, CC BY 2.0",
+  "source": "https://commons.wikimedia.org/wiki/File:The_Ka%27ba,_Great_Mosque_of_Mecca,_Saudi_Arabia_(1).jpg"
+ },
+ {
+  "id": "makkah",
+  "name": "Makkah · clock tower",
+  "credit": "عباد ديرانية, CC BY-SA 3.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Mecca_at_night.jpg"
+ },
+ {
+  "id": "madinahday",
+  "name": "Madinah",
+  "credit": "TheHadiRahim, CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:Wide_shot_of_the_Green_Dome_at_The_Prophet%27s_Mosque_(Al_Masjid-e-Nabawi).jpg"
+ },
+ {
+  "id": "quba",
+  "name": "Masjid Quba",
+  "credit": "Indonesiagood, CC BY 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Masjid_Quba_(Umroh_Ramadhan_2023)-1.jpg"
+ },
+ {
+  "id": "aqsa",
+  "name": "Al-Aqsa",
+  "credit": "Godot13, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Al-Aqsa_Mosque_(Temple_Mount,_Jerusalem,_2008)_02.jpg"
+ },
+ {
+  "id": "umayyad",
+  "name": "Umayyad Mosque",
+  "credit": "Vyacheslav Argenberg, CC BY 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Damascus,_Syria,_The_Umayyad_Mosque,_Islamic_Architecture.jpg"
+ },
+ {
+  "id": "cordoba",
+  "name": "Córdoba",
+  "credit": "Holger Uwe Schmitt, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:%22Eine_beeindruckende_Mischung_aus_islamischer_und_christlicher_Architektur%22._20.jpg"
+ },
+ {
+  "id": "kairouan",
+  "name": "Kairouan",
+  "credit": "Ed Kirby, CC BY-SA 2.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Courtyard_of_the_Great_Mosque_of_Kairouan_-_cour_de_la_Grande_Mosqu%C3%A9e_de_Kairouan.jpg"
+ },
+ {
+  "id": "sultanhassan",
+  "name": "Sultan Hassan, Cairo",
+  "credit": "Mohammed Moussa, CC BY-SA 3.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Madrassa_of_Sultan_Hassan.jpg"
+ },
+ {
+  "id": "hagia",
+  "name": "Hagia Sophia",
+  "credit": "Yair Haklai, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Exterior_of_Hagia_Sophia-.jpg"
+ },
+ {
+  "id": "bluemosque",
+  "name": "Blue Mosque",
+  "credit": "Jorge Láscar, CC BY-SA 3.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Sultan_Ahmed_Mosque-Blue_Mosque-at_dusk.JPG"
+ },
+ {
+  "id": "suleymaniye",
+  "name": "Süleymaniye",
+  "credit": "Bernard Gagnon, CC BY-SA 3.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Domes_of_the_S%C3%BCleymaniye_Mosque.jpg"
+ },
+ {
+  "id": "jama",
+  "name": "Jama Masjid, Delhi",
+  "credit": "Jakub Hałun, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:20191203_Wielki_Meczet_w_Delhi_0700_6459_DxO.jpg"
+ },
+ {
+  "id": "shatgumbad",
+  "name": "Shat Gumbad, Bagerhat",
+  "credit": "মোয়ায মাহমুদ, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Sixty_Dome_Mosque,Bagerhat.jpg"
+ },
+ {
+  "id": "tara",
+  "name": "Star Mosque, Dhaka",
+  "credit": "Babul abdul malek, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:DG_21_-08_STAR_MOSQUE_DHAKA_IMG_3415.jpg"
+ },
+ {
+  "id": "qaboos",
+  "name": "Sultan Qaboos",
+  "credit": "Francesco Bini, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Muscat,_moschea_del_sultano_qaboos,_esterno_00,2.jpg"
+ },
+ {
+  "id": "casablanca",
+  "name": "Casablanca",
+  "credit": "Milamber's portfolio, CC BY 2.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Sunshine_on_mosque_Hassan_II_in_Casablanca,_Morocco_-_Flickr_-_Milamber%27s_portfolio.jpg"
+ },
+ {
+  "id": "wadirum",
+  "name": "Wadi Rum",
+  "credit": "Berthold Werner, CC BY-SA 3.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Wadi_Rum_BW_10.JPG"
+ },
+ {
+  "id": "dunes",
+  "name": "Sahara",
+  "credit": "Thomas Fuhrmann, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Erg_Chebbi_sunset.jpg"
+ },
+ {
+  "id": "stars",
+  "name": "Desert night",
+  "credit": "Chrdoerr, CC BY-SA 4.0",
+  "source": "https://commons.wikimedia.org/wiki/File:Mesmerising_natural_beauty_-_the_milky_way_and_the_desert_at_Al_Quaa.jpg"
+ }
+]
