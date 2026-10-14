@@ -5,7 +5,8 @@
 //! changes once a minute the CPU is plenty and keeps memory small. Each monitor's photo is
 //! decoded once, at that monitor's size, and kept as one bitmap.
 
-use std::cell::Cell;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use windows::core::{w, Interface, Result, HSTRING};
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, RECT};
 use windows::Win32::Graphics::Direct2D::Common::*;
@@ -64,6 +65,9 @@ pub struct Style {
     pub show_reminder: bool,
     pub show_special: bool,
     pub show_times: bool,
+    pub together: bool,
+    pub times_style: String,
+    pub monitor_style: String,
 }
 
 /// A built-in font as a DirectWrite collection, and its family name as DirectWrite sees it
@@ -125,8 +129,8 @@ pub struct Renderer {
     blurred: Vec<IWICBitmap>,
     of_monitor: Vec<usize>,
     /// Rectangles found during the last paint (client coordinates), for partial repaints.
-    pub clock_rect: Cell<RECT>,
-    pub strip_rect: Cell<RECT>,
+    pub clock_rect: RefCell<BTreeMap<usize, RECT>>,
+    pub strip_rect: RefCell<BTreeMap<usize, RECT>>,
 }
 
 fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
@@ -210,8 +214,8 @@ impl Renderer {
                 photos: decoded,
                 blurred,
                 of_monitor,
-                clock_rect: Cell::new(RECT::default()),
-                strip_rect: Cell::new(RECT::default()),
+                clock_rect: RefCell::new(BTreeMap::new()),
+                strip_rect: RefCell::new(BTreeMap::new()),
             })
         }
     }
@@ -254,6 +258,13 @@ impl Renderer {
         }
     }
 
+    /// How wide the laid-out text actually is.
+    fn width(&self, p: &Piece) -> Result<f32> {
+        let mut m = DWRITE_TEXT_METRICS::default();
+        unsafe { p.layout.GetMetrics(&mut m)? };
+        Ok(m.width)
+    }
+
     /// Like `piece`, but shrinks the font (down to 60%) until the text fits `max_h`, and as a
     /// last resort ends it with an ellipsis rather than overflow.
     #[allow(clippy::too_many_arguments)]
@@ -278,7 +289,10 @@ impl Renderer {
     }
 
     /// Paints `area` (client coordinates) of the window covering all `monitors`.
-    pub fn paint(&self, hdc: HDC, area: RECT, monitors: &[RECT], primary: usize, f: &Frame, st: &Style) -> Result<()> {
+    /// `panels`: the monitors (indexes into `monitors`) that show the text panel.
+    /// `work`: each monitor without its taskbar, where the text panel is laid out.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint(&self, hdc: HDC, area: RECT, monitors: &[RECT], work: &[RECT], panels: &[usize], f: &Frame, st: &Style) -> Result<()> {
         unsafe {
             let props = D2D1_RENDER_TARGET_PROPERTIES {
                 r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
@@ -299,8 +313,8 @@ impl Renderer {
                     continue;
                 }
                 self.picture(&rt, i, *m, f, &base)?;
-                if i == primary {
-                    self.panel(&rt, i, *m, f, st)?;
+                if panels.contains(&i) {
+                    self.panel(&rt, i, work.get(i).copied().unwrap_or(*m), f, st)?;
                 }
             }
             t.EndDraw(None, None)?;
@@ -354,8 +368,8 @@ impl Renderer {
             }
             "bar" => (x0 + 4.0 * u, x0 + w - 4.0 * u, 0, 0.0, y0 + h - 2.4 * u, 5.0 * u),
             _ => {
-                let (l, r) = if st.side_left { (x0 + 4.6 * u, x0 + 35.6 * u) } else { (x0 + w - 35.6 * u, x0 + w - 4.6 * u) };
-                (l, r, 0, y0 + 4.4 * u, y0 + h - 3.4 * u, 8.4 * u)
+                let (l, r) = if st.side_left { (x0 + 3.2 * u, x0 + 34.2 * u) } else { (x0 + w - 34.2 * u, x0 + w - 3.2 * u) };
+                (l, r, 0, y0 + 3.2 * u, y0 + h - 3.2 * u, 8.4 * u)
             }
         };
         let cw = col_r - col_l;
@@ -386,37 +400,70 @@ impl Renderer {
         }
         let ampm = self.piece(&f.ampm, &self.format(label, clock_size * 0.17, DWRITE_FONT_WEIGHT_LIGHT, false)?, 8.0 * u, 0, 0.0, soft)?;
 
+        // ---- heights of the prayer times and the system strip ----
+        // The bottom bar is short: a tall list becomes cards there.
+        let times_style = if bar && st.times_style == "list" { "grid" } else { st.times_style.as_str() };
+        let row_h = if st.show_times && !f.times.is_empty() {
+            match times_style {
+                "grid" => 7.4 * u,
+                "list" => 6.0 * 1.85 * u + 0.6 * u,
+                "timeline" => 5.0 * u,
+                _ => 4.0 * u,
+            }
+        } else {
+            0.0
+        };
+        let strip_h = if f.monitor.is_some() {
+            match st.monitor_style.as_str() {
+                "bars" => 3.0 * u,
+                "rings" => 6.2 * u,
+                "text" => 1.4 * u,
+                _ => 3.4 * u,
+            }
+        } else {
+            0.0
+        };
         // ---- reminder group ----
+        // If the column is too short for everything, squeeze the reminder step by step: smaller
+        // Arabic and meaning, then no special-day line, then no meaning. Nothing may overlap.
+        let gaps = 3.0 * u + if row_h > 0.0 { 1.6 * u } else { 0.0 } + if strip_h > 0.0 { 1.4 * u } else { 0.0 };
+        let clock_h: f32 = tops.iter().map(|(p, g)| p.h + g).sum();
+        let budget = if corner || bar { f32::MAX } else { (bottom - top) - clock_h - row_h - strip_h - gaps };
         let mut rems: Vec<(Piece, f32)> = vec![]; // (piece, gap below)
-        if st.show_special {
-            if let Some((text, reference)) = &f.special {
-                rems.push((self.piece(text, &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, rem_w, align, 0.0, acc)?, 0.15 * u));
-                rems.push((self.piece(reference, &self.format('e', 0.72 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rem_w, align, 0.0, faint)?, 1.3 * u));
+        for level in 0..4 {
+            rems.clear();
+            let shrink = if level >= 1 { 0.65 } else { 1.0 };
+            if st.show_special && level < 2 {
+                if let Some((text, reference)) = &f.special {
+                    rems.push((self.piece(text, &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, rem_w, align, 0.0, acc)?, 0.15 * u));
+                    rems.push((self.piece(reference, &self.format('e', 0.72 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rem_w, align, 0.0, faint)?, 1.3 * u));
+                }
             }
-        }
-        if st.show_reminder && !f.kind.is_empty() {
-            rems.push((self.piece(&f.kind.to_uppercase(), &self.format(label, 0.8 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, rem_w, align, 0.1 * u * track, acc)?, 0.45 * u));
-            if !f.arabic.is_empty() {
-                let max = if bar { 5.2 * u } else { 7.5 * u };
-                rems.push((self.fitted(&f.arabic, 'a', 2.3 * u * st.ar_scale, DWRITE_FONT_WEIGHT_NORMAL, true, rem_w, max, align, white)?, 0.45 * u));
+            if st.show_reminder && !f.kind.is_empty() {
+                rems.push((self.piece(&f.kind.to_uppercase(), &self.format(label, 0.8 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, rem_w, align, 0.1 * u * track, acc)?, 0.45 * u));
+                if !f.arabic.is_empty() {
+                    let max = if bar { 5.2 * u } else { 7.5 * u } * shrink;
+                    rems.push((self.fitted(&f.arabic, 'a', 2.3 * u * st.ar_scale, DWRITE_FONT_WEIGHT_NORMAL, true, rem_w, max, align, white)?, 0.45 * u));
+                }
+                if !f.meaning.is_empty() && level < 3 {
+                    let which = if f.meaning_bn { 'b' } else { 'e' };
+                    let max = if bar { 3.2 * u } else { 5.0 * u } * shrink;
+                    rems.push((self.fitted(&f.meaning, which, 1.05 * u, DWRITE_FONT_WEIGHT_LIGHT, false, rem_w, max, align, soft)?, 0.4 * u));
+                }
+                rems.push((self.piece(&f.source, &self.format('e', 0.78 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rem_w, align, 0.0, faint)?, 0.0));
             }
-            if !f.meaning.is_empty() {
-                let which = if f.meaning_bn { 'b' } else { 'e' };
-                let max = if bar { 3.2 * u } else { 5.0 * u };
-                rems.push((self.fitted(&f.meaning, which, 1.05 * u, DWRITE_FONT_WEIGHT_LIGHT, false, rem_w, max, align, soft)?, 0.4 * u));
+            if rems.iter().map(|(p, g)| p.h + g).sum::<f32>() <= budget {
+                break;
             }
-            rems.push((self.piece(&f.source, &self.format('e', 0.78 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rem_w, align, 0.0, faint)?, 0.0));
         }
 
         // ---- vertical placement ----
-        let row_h = if st.show_times && !f.times.is_empty() { 4.0 * u } else { 0.0 };
-        let strip_h = if f.monitor.is_some() { 3.4 * u } else { 0.0 };
         let mut y = bottom;
-        let strip_y = y - strip_h;
+        let mut strip_y = y - strip_h;
         if strip_h > 0.0 {
             y = strip_y - 1.4 * u;
         }
-        let row_y = y - row_h;
+        let mut row_y = y - row_h;
         let mut rem_bottom = if bar { y } else if row_h > 0.0 { row_y - 1.6 * u } else { y };
         if bar && strip_h > 0.0 {
             rem_bottom = strip_y - 1.4 * u;
@@ -429,7 +476,7 @@ impl Renderer {
             p.y = yy;
             placed.push(p);
         }
-        let rem_top = placed.last().map(|p| p.y).unwrap_or(rem_bottom);
+        let mut rem_top = placed.last().map(|p| p.y).unwrap_or(rem_bottom);
 
         let span: f32 = tops.iter().map(|(p, g)| p.h + g).sum();
         let mut cy = if corner {
@@ -439,6 +486,22 @@ impl Renderer {
         } else {
             top
         };
+        // Together: close the gap between the clock and the rest, and centre the whole block.
+        if st.together && !corner && !bar {
+            let gap = 3.0 * u;
+            let block = span + gap + (bottom - rem_top);
+            let free = (bottom - top) - block;
+            if free > 0.0 {
+                cy = top + free / 2.0;
+                let lift = free / 2.0;
+                for p in placed.iter_mut() {
+                    p.y -= lift;
+                }
+                row_y -= lift;
+                strip_y -= lift;
+                rem_top -= lift;
+            }
+        }
         let mut clock_pieces: Vec<Piece> = vec![];
         for (mut p, gap) in tops {
             p.x = clock_x;
@@ -562,7 +625,7 @@ impl Renderer {
                 ap.y = c.y + c.h * 0.66 - ap.h;
                 draw(&ap)?;
             }
-            self.clock_rect.set(RECT { left: (dl - u) as i32, top: c.y as i32, right: (dr + 7.0 * u) as i32, bottom: (c.y + c.h) as i32 });
+            self.clock_rect.borrow_mut().insert(mi, RECT { left: (dl - u) as i32, top: c.y as i32, right: (dr + 7.0 * u) as i32, bottom: (c.y + c.h) as i32 });
         }
         if has_next {
             // progress from the last prayer to the next one
@@ -583,34 +646,111 @@ impl Renderer {
             draw(p)?;
         }
 
-        // ---- prayer row ----
+        // ---- prayer times ----
         if row_h > 0.0 {
-            let n = f.times.len() as f32;
-            let colw = row_w / n;
-            unsafe {
-                t.FillRectangle(&rect(row_x, row_y, row_x + row_w, row_y + 1.0), &t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.16), None)?);
-            }
+            let n = f.times.len();
+            let order: Vec<usize> = if st.rtl_labels { (0..n).rev().collect() } else { (0..n).collect() };
+            let ta = if centre { 1 } else { 0 };
             let lf = self.format(label, 0.72 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, false)?;
             let vf = self.format('e', 1.15 * u, DWRITE_FONT_WEIGHT_LIGHT, false)?;
-            let ta = if centre { 1 } else { 0 };
-            for slot in 0..f.times.len() {
-                let i = if st.rtl_labels { f.times.len() - 1 - slot } else { slot };
-                let (name, time, now) = &f.times[i];
-                let x = row_x + slot as f32 * colw;
-                let mut a = self.piece(name, &lf, colw, ta, 0.0, if *now { acc } else { faint })?;
-                a.x = x;
-                a.y = row_y + 0.9 * u;
-                draw(&a)?;
-                let mut b = self.piece(time, &vf, colw, ta, 0.0, if *now { white } else { soft })?;
-                b.x = x;
-                b.y = row_y + 2.0 * u;
-                draw(&b)?;
+            let fill = |r: D2D_RECT_F, c: D2D1_COLOR_F, rad: f32| -> Result<()> {
+                unsafe { t.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: rad, radiusY: rad }, &t.CreateSolidColorBrush(&c, None)?) };
+                Ok(())
+            };
+            match times_style {
+                "grid" => {
+                    // 3 × 2 cards; the current prayer's card is tinted with the accent
+                    let (gx, gy) = (0.6 * u, 0.6 * u);
+                    let cwid = (row_w - 2.0 * gx) / 3.0;
+                    let ch = (row_h - gy) / 2.0;
+                    for (slot, &i) in order.iter().enumerate() {
+                        let (name, time, now) = &f.times[i];
+                        let x = row_x + (slot % 3) as f32 * (cwid + gx);
+                        let y = row_y + (slot / 3) as f32 * (ch + gy);
+                        fill(rect(x, y, x + cwid, y + ch), if *now { rgba(acc.r, acc.g, acc.b, 0.24) } else { rgba(1.0, 1.0, 1.0, 0.07) }, 0.6 * u)?;
+                        let mut a = self.piece(name, &lf, cwid - 1.6 * u, 0, 0.0, if *now { acc } else { faint })?;
+                        a.x = x + 0.8 * u;
+                        a.y = y + 0.55 * u;
+                        draw(&a)?;
+                        let mut b = self.piece(time, &vf, cwid - 1.6 * u, 0, 0.0, if *now { white } else { soft })?;
+                        b.x = x + 0.8 * u;
+                        b.y = y + 1.55 * u;
+                        draw(&b)?;
+                    }
+                }
+                "list" => {
+                    // one prayer per line: name on one side, time on the other
+                    let lh = 1.85 * u;
+                    let nf = self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?;
+                    let tf = self.format('e', 1.0 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?;
+                    for (k, i) in (0..n).enumerate() {
+                        let (name, time, now) = &f.times[i];
+                        let y = row_y + k as f32 * lh;
+                        if *now {
+                            fill(rect(row_x - 0.6 * u, y + 0.1 * u, row_x + row_w + 0.6 * u, y + lh - 0.1 * u), rgba(acc.r, acc.g, acc.b, 0.16), 0.4 * u)?;
+                        }
+                        let mut a = self.piece(name, &nf, row_w, if st.rtl_labels { 2 } else { 0 }, 0.0, if *now { acc } else { soft })?;
+                        a.x = row_x;
+                        a.y = y + (lh - a.h) / 2.0;
+                        draw(&a)?;
+                        let mut b = self.piece(time, &tf, row_w, if st.rtl_labels { 0 } else { 2 }, 0.0, if *now { white } else { soft })?;
+                        b.x = row_x;
+                        b.y = y + (lh - b.h) / 2.0;
+                        draw(&b)?;
+                        if k + 1 < n {
+                            fill(rect(row_x, y + lh - 0.5, row_x + row_w, y + lh), rgba(1.0, 1.0, 1.0, 0.07), 0.0)?;
+                        }
+                    }
+                }
+                "timeline" => {
+                    // a line with a dot per prayer; the current one glows
+                    let colw = row_w / n as f32;
+                    let ly = row_y + 1.0 * u;
+                    fill(rect(row_x, ly - 0.06 * u, row_x + row_w, ly + 0.06 * u), rgba(1.0, 1.0, 1.0, 0.2), 0.0)?;
+                    for (slot, &i) in order.iter().enumerate() {
+                        let (name, time, now) = &f.times[i];
+                        let x = row_x + slot as f32 * colw;
+                        unsafe {
+                            let e = |r: f32| D2D1_ELLIPSE { point: Vector2 { X: x + 0.3 * u, Y: ly }, radiusX: r, radiusY: r };
+                            if *now {
+                                t.FillEllipse(&e(0.65 * u), &t.CreateSolidColorBrush(&rgba(acc.r, acc.g, acc.b, 0.3), None)?);
+                                t.FillEllipse(&e(0.32 * u), &t.CreateSolidColorBrush(&acc, None)?);
+                            } else {
+                                t.FillEllipse(&e(0.26 * u), &t.CreateSolidColorBrush(&rgba(0.8, 0.8, 0.8, 0.9), None)?);
+                            }
+                        }
+                        let mut a = self.piece(name, &lf, colw, 0, 0.0, if *now { acc } else { faint })?;
+                        a.x = x;
+                        a.y = ly + 1.0 * u;
+                        draw(&a)?;
+                        let mut b = self.piece(time, &vf, colw, 0, 0.0, if *now { white } else { soft })?;
+                        b.x = x;
+                        b.y = ly + 2.1 * u;
+                        draw(&b)?;
+                    }
+                }
+                _ => {
+                    let colw = row_w / n as f32;
+                    fill(rect(row_x, row_y, row_x + row_w, row_y + 1.0), rgba(1.0, 1.0, 1.0, 0.16), 0.0)?;
+                    for (slot, &i) in order.iter().enumerate() {
+                        let (name, time, now) = &f.times[i];
+                        let x = row_x + slot as f32 * colw;
+                        let mut a = self.piece(name, &lf, colw, ta, 0.0, if *now { acc } else { faint })?;
+                        a.x = x;
+                        a.y = row_y + 0.9 * u;
+                        draw(&a)?;
+                        let mut b = self.piece(time, &vf, colw, ta, 0.0, if *now { white } else { soft })?;
+                        b.x = x;
+                        b.y = row_y + 2.0 * u;
+                        draw(&b)?;
+                    }
+                }
             }
         }
 
         // ---- system strip ----
         if let Some((s, hist, labels)) = &f.monitor {
-            let (sx, sw) = if bar { (col_l, cw) } else { (col_l, cw) };
+            let (sx, sw) = (col_l, cw);
             let cell = sw / 5.0;
             let lf = self.format('e', 0.6 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, false)?;
             let vf = self.format('e', 0.84 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?;
@@ -621,35 +761,108 @@ impl Renderer {
                 format!("{:.0}%", s.disk * 100.0),
                 format!("↓ {}", crate::sysmon::rate(s.down)),
             ];
+            let level = [s.cpu, s.mem, s.gpu, s.disk, hist[4].last().copied().unwrap_or(0.0)].map(|v| v.clamp(0.0, 1.0));
             let line = unsafe { t.CreateSolidColorBrush(&rgba(acc.r, acc.g, acc.b, 0.85), None)? };
-            for i in 0..5 {
-                let x = sx + i as f32 * cell;
-                let mut a = self.piece(&labels[i], &lf, cell, 0, 0.08 * u, faint)?;
-                a.x = x;
-                a.y = strip_y;
-                draw(&a)?;
-                let mut b = self.piece(&values[i], &vf, cell - 0.4 * u, 0, 0.0, soft)?;
-                b.x = x;
-                b.y = strip_y + 0.95 * u;
-                draw(&b)?;
-                let pts = &hist[i];
-                if pts.len() > 1 {
-                    unsafe {
-                        let geo = self.factory.CreatePathGeometry()?;
-                        let sink = geo.Open()?;
-                        let (gx, gy, gw, gh) = (x, strip_y + 2.45 * u, cell - 1.4 * u, 0.8 * u);
-                        let step = gw / (crate::sysmon::HISTORY - 1) as f32;
-                        let off = (crate::sysmon::HISTORY - pts.len()) as f32 * step;
-                        sink.BeginFigure(Vector2 { X: gx + off, Y: gy + gh * (1.0 - pts[0]) }, D2D1_FIGURE_BEGIN_HOLLOW);
-                        let rest: Vec<Vector2> = pts.iter().enumerate().skip(1).map(|(k, v)| Vector2 { X: gx + off + k as f32 * step, Y: gy + gh * (1.0 - v) }).collect();
-                        sink.AddLines(&rest);
-                        sink.EndFigure(D2D1_FIGURE_END_OPEN);
-                        sink.Close()?;
-                        t.DrawGeometry(&geo, &line, 1.2, None);
+            let track = unsafe { t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.15), None)? };
+            match st.monitor_style.as_str() {
+                "text" => {
+                    // one quiet line: CPU 8%   MEMORY 10.4 / 28 GB   …
+                    let mut x = sx;
+                    for i in 0..5 {
+                        let mut a = self.piece(&labels[i], &lf, 20.0 * u, 0, 0.08 * u, faint)?;
+                        let lw = self.width(&a)?;
+                        a.x = x;
+                        a.y = strip_y + 0.2 * u;
+                        draw(&a)?;
+                        let mut b = self.piece(&values[i], &vf, 20.0 * u, 0, 0.0, soft)?;
+                        let vw = self.width(&b)?;
+                        b.x = x + lw + 0.4 * u;
+                        b.y = strip_y;
+                        draw(&b)?;
+                        x += lw + vw + 1.6 * u;
+                        if x > sx + sw {
+                            break;
+                        }
+                    }
+                }
+                "rings" => {
+                    // round gauges with the percentage inside
+                    let rad = (cell * 0.5 - 0.8 * u).min(2.0 * u);
+                    for i in 0..5 {
+                        let cx = sx + i as f32 * cell + cell / 2.0;
+                        let cyy = strip_y + rad + 0.2 * u;
+                        unsafe {
+                            let e = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cyy }, radiusX: rad, radiusY: rad };
+                            t.DrawEllipse(&e, &track, 0.32 * u, None);
+                            let v = level[i].max(0.005).min(0.999);
+                            let a0 = -std::f32::consts::FRAC_PI_2;
+                            let a1 = a0 + v * std::f32::consts::TAU;
+                            let geo = self.factory.CreatePathGeometry()?;
+                            let sink = geo.Open()?;
+                            sink.BeginFigure(Vector2 { X: cx + rad * a0.cos(), Y: cyy + rad * a0.sin() }, D2D1_FIGURE_BEGIN_HOLLOW);
+                            sink.AddArc(&D2D1_ARC_SEGMENT {
+                                point: Vector2 { X: cx + rad * a1.cos(), Y: cyy + rad * a1.sin() },
+                                size: D2D_SIZE_F { width: rad, height: rad },
+                                rotationAngle: 0.0,
+                                sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                arcSize: if v > 0.5 { D2D1_ARC_SIZE_LARGE } else { D2D1_ARC_SIZE_SMALL },
+                            });
+                            sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                            sink.Close()?;
+                            t.DrawGeometry(&geo, &line, 0.32 * u, None);
+                        }
+                        let pct = if i == 1 { format!("{:.0}%", s.mem * 100.0) } else if i == 4 { crate::sysmon::rate(s.down).replace(" ", "\n") } else { values[i].clone() };
+                        let mut b = self.piece(&pct, &self.format('e', 0.72 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rad * 2.0, 1, 0.0, soft)?;
+                        b.x = cx - rad;
+                        b.y = cyy - b.h / 2.0;
+                        draw(&b)?;
+                        let mut a = self.piece(&labels[i], &lf, cell, 1, 0.08 * u, faint)?;
+                        a.x = cx - cell / 2.0;
+                        a.y = cyy + rad + 0.5 * u;
+                        draw(&a)?;
+                    }
+                }
+                style => {
+                    for i in 0..5 {
+                        let x = sx + i as f32 * cell;
+                        let mut a = self.piece(&labels[i], &lf, cell, 0, 0.08 * u, faint)?;
+                        a.x = x;
+                        a.y = strip_y;
+                        draw(&a)?;
+                        let mut b = self.piece(&values[i], &vf, cell - 0.4 * u, 0, 0.0, soft)?;
+                        b.x = x;
+                        b.y = strip_y + 0.95 * u;
+                        draw(&b)?;
+                        if style == "bars" {
+                            // a fill bar for how busy it is
+                            let (bx, by, bw) = (x, strip_y + 2.35 * u, cell - 1.4 * u);
+                            unsafe {
+                                let q = |r: D2D_RECT_F| D2D1_ROUNDED_RECT { rect: r, radiusX: 0.15 * u, radiusY: 0.15 * u };
+                                t.FillRoundedRectangle(&q(rect(bx, by, bx + bw, by + 0.32 * u)), &track);
+                                t.FillRoundedRectangle(&q(rect(bx, by, bx + bw * level[i].max(0.03), by + 0.32 * u)), &line);
+                            }
+                            continue;
+                        }
+                        let pts = &hist[i];
+                        if pts.len() > 1 {
+                            unsafe {
+                                let geo = self.factory.CreatePathGeometry()?;
+                                let sink = geo.Open()?;
+                                let (gx, gy, gw, gh) = (x, strip_y + 2.45 * u, cell - 1.4 * u, 0.8 * u);
+                                let step = gw / (crate::sysmon::HISTORY - 1) as f32;
+                                let off = (crate::sysmon::HISTORY - pts.len()) as f32 * step;
+                                sink.BeginFigure(Vector2 { X: gx + off, Y: gy + gh * (1.0 - pts[0]) }, D2D1_FIGURE_BEGIN_HOLLOW);
+                                let rest: Vec<Vector2> = pts.iter().enumerate().skip(1).map(|(k, v)| Vector2 { X: gx + off + k as f32 * step, Y: gy + gh * (1.0 - v) }).collect();
+                                sink.AddLines(&rest);
+                                sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                                sink.Close()?;
+                                t.DrawGeometry(&geo, &line, 1.2, None);
+                            }
+                        }
                     }
                 }
             }
-            self.strip_rect.set(RECT { left: sx as i32 - 4, top: strip_y as i32 - 4, right: (sx + sw) as i32 + 4, bottom: (strip_y + strip_h) as i32 + 6 });
+            self.strip_rect.borrow_mut().insert(mi, RECT { left: sx as i32 - 4, top: strip_y as i32 - 4, right: (sx + sw) as i32 + 4, bottom: (strip_y + strip_h) as i32 + 8 });
         }
         Ok(())
     }

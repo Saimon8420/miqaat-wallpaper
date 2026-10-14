@@ -15,6 +15,13 @@ use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
 pub struct App {
     pub s: Settings,
     pub month: Option<Month>,
+    /// The months before and after `month`, so a ±2 day Hijri adjustment near the start or
+    /// end of a month still reads the API's real calendar (months are 29 or 30 days).
+    pub near: Vec<Month>,
+    /// The month key whose neighbours have already been loaded or tried.
+    pub near_key: String,
+    /// When the neighbours were last tried (seconds since 1970).
+    pub near_retry: i64,
     pub fetching: bool,
     pub failed: bool,
     picker: Picker,
@@ -24,6 +31,8 @@ pub struct App {
     pub renderer: Option<Renderer>,
     look_key: String,
     pub monitors: Vec<RECT>,
+    /// Each monitor without its taskbar; the text panel stays inside this.
+    pub work: Vec<RECT>,
     pub primary: usize,
     pub sysmon: Option<Monitor>,
     /// Paused from the tray menu.
@@ -70,6 +79,9 @@ impl App {
         App {
             s,
             month: None,
+            near: vec![],
+            near_key: String::new(),
+            near_retry: 0,
             fetching: false,
             failed: false,
             picker: Picker::new(),
@@ -79,6 +91,7 @@ impl App {
             renderer: None,
             look_key: String::new(),
             monitors: vec![],
+            work: vec![],
             primary: 0,
             sysmon: None,
             paused: false,
@@ -115,7 +128,7 @@ impl App {
 
     pub fn day(&self, days: i64) -> Option<&Day> {
         let d = date_text(days);
-        self.month.as_ref()?.days.iter().find(|x| x.date == d)
+        self.month.iter().chain(self.near.iter()).flat_map(|m| m.days.iter()).find(|x| x.date == d)
     }
 
     /// Today's Hijri date with the user's adjustment.
@@ -124,6 +137,7 @@ impl App {
         if let Some(d) = self.day(days + adj as i64) {
             return hijri::parse(&d.hijri);
         }
+        // Only if the neighbouring month couldn't be downloaded: count 30-day months.
         Some(hijri::parse(&self.day(days)?.hijri)?.shift(adj))
     }
 
@@ -234,6 +248,9 @@ impl App {
             show_reminder: self.s.show_reminder,
             show_special: self.s.show_special,
             show_times: self.s.show_times,
+            together: self.s.spacing != "spread",
+            times_style: self.s.times_style.clone(),
+            monitor_style: self.s.monitor_style.clone(),
         }
     }
 
@@ -350,9 +367,39 @@ impl App {
         }
     }
 
-    /// Part of the primary monitor that changes every minute (client coordinates).
-    pub fn panel_rect(&self) -> Option<RECT> {
-        let p = *self.monitors.get(self.primary)?;
+    /// Indexes into `monitors` in screen order: left to right, then top to bottom. "Screen 1"
+    /// in the settings is the first of these.
+    pub fn screen_order(&self) -> Vec<usize> {
+        let mut idx: Vec<usize> = (0..self.monitors.len()).collect();
+        idx.sort_by_key(|&i| (self.monitors[i].left, self.monitors[i].top));
+        idx
+    }
+
+    /// The monitors that show the clock panel (indexes into `monitors`).
+    pub fn panel_monitors(&self) -> Vec<usize> {
+        let n = self.monitors.len();
+        let main = vec![self.primary.min(n.saturating_sub(1))];
+        match self.s.panel_on.as_str() {
+            "all" => (0..n).collect(),
+            "main" | "" => main,
+            list => {
+                let order = self.screen_order();
+                let mut v: Vec<usize> = list.split(',').filter_map(|x| x.trim().parse::<usize>().ok()).filter_map(|k| order.get(k.wrapping_sub(1)).copied()).collect();
+                v.sort();
+                v.dedup();
+                // a chosen screen that is unplugged falls back to the main one
+                if v.is_empty() { main } else { v }
+            }
+        }
+    }
+
+    /// Parts of the screen that change every minute (client coordinates), one per panel.
+    pub fn panel_rects(&self) -> Vec<RECT> {
+        self.panel_monitors().into_iter().filter_map(|i| self.panel_rect(i)).collect()
+    }
+
+    fn panel_rect(&self, i: usize) -> Option<RECT> {
+        let p = *self.monitors.get(i)?;
         let (w, h) = (p.right - p.left, p.bottom - p.top);
         Some(match self.s.layout.as_str() {
             "centre" => p,
@@ -394,5 +441,29 @@ impl App {
         }
         self.notified.retain(|(d, _)| *d >= days - 1);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn month(key: &str, days: &[(&str, &str)]) -> Month {
+        Month { key: key.into(), offset: 360, days: days.iter().map(|(d, h)| Day { date: d.to_string(), hijri: h.to_string(), minutes: [280, 355, 710, 950, 1065, 1140] }).collect() }
+    }
+
+    #[test]
+    fn hijri_adjustment_uses_the_real_calendar_across_months() {
+        // 30 November is the last day of a month whose Hijri month has only 29 days.
+        let mut a = App::new(Settings { hijri_adjust: 1, ..Settings::default() });
+        a.month = Some(month("nov", &[("2026-11-29", "28 Jumada al-Thani 1448"), ("2026-11-30", "29 Jumada al-Thani 1448")]));
+        let nov30 = times::days_from_civil(2026, 11, 30);
+        // Without the next month the app can only guess with 30-day months.
+        assert_eq!(a.hijri(nov30), Some(Hijri { day: 30, month: 6, year: 1448 }));
+        a.near = vec![month("dec", &[("2026-12-01", "1 Rajab 1448")])];
+        assert_eq!(a.hijri(nov30), Some(Hijri { day: 1, month: 7, year: 1448 }));
+        a.s.hijri_adjust = -1;
+        let dec1 = times::days_from_civil(2026, 12, 1);
+        assert_eq!(a.hijri(dec1), Some(Hijri { day: 29, month: 6, year: 1448 }));
     }
 }

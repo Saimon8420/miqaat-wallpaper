@@ -87,32 +87,73 @@ fn invalidate(r: Option<RECT>) {
     }
 }
 
-/// Starts fetching the month the city's date needs, unless it is cached or already loaded.
+/// What a background download brings back: the month now (if it was needed) and its neighbours.
+struct Fetched {
+    current: Option<Result<times::Month, String>>,
+    near: Vec<times::Month>,
+    near_key: String,
+}
+
+/// Makes sure the city's current month of prayer times is loaded, plus the months before and
+/// after it (for the Hijri adjustment near a month's edge). Saved months are used first; anything
+/// missing is downloaded on a worker thread.
 fn ensure_times() {
     let job = with_app(|a| {
-        let key = a.wanted_key();
-        if a.month.as_ref().map(|m| m.key == key).unwrap_or(false) || a.fetching {
+        if a.fetching {
             return None;
         }
-        if let Some(m) = times::cached(&key) {
-            a.month = Some(m);
-            a.failed = false;
+        let key = a.wanted_key();
+        let (days, _) = a.now();
+        let (y, m, _) = times::civil_from_days(days);
+        let (s_lat, s_lng, method, madhab) = (a.s.lat, a.s.lng, a.s.method.clone(), a.s.madhab.clone());
+        let mk = |(yy, mm): (i32, u32)| times::month_key(s_lat, s_lng, &method, &madhab, yy, mm);
+        let near_keys: Vec<String> = times::neighbours(y, m).iter().map(|&n| mk(n)).collect();
+        let mut keep = near_keys.clone();
+        keep.push(key.clone());
+
+        let need_current = !a.month.as_ref().map(|mo| mo.key == key).unwrap_or(false);
+        if need_current {
+            if let Some(mo) = times::cached(&key) {
+                a.month = Some(mo);
+                a.failed = false;
+            }
+        }
+        let need_current = !a.month.as_ref().map(|mo| mo.key == key).unwrap_or(false);
+        if a.near_key != key {
+            a.near = near_keys.iter().filter_map(|k| times::cached(k)).collect();
+            if a.near.len() == near_keys.len() {
+                a.near_key = key.clone();
+                times::prune(&keep);
+            }
+        }
+        // Neighbours are a nice-to-have: offline, try them again at most every 10 minutes.
+        let need_near = a.near_key != key && times::utc_seconds() - a.near_retry >= 600;
+        if !need_current && !need_near {
             return None;
         }
         a.fetching = true;
-        let (days, _) = a.now();
-        let (y, m, _) = times::civil_from_days(days);
-        Some((a.s.lat, a.s.lng, a.s.method.clone(), a.s.madhab.clone(), y, m))
+        if need_near {
+            a.near_retry = times::utc_seconds();
+        }
+        let missing: Vec<(i32, u32)> = if need_near { times::neighbours(y, m).into_iter().filter(|&n| !a.near.iter().any(|x| x.key == mk(n))).collect() } else { vec![] };
+        Some((s_lat, s_lng, method.clone(), madhab.clone(), y, m, need_current, missing, key, keep))
     })
     .flatten();
-    if let Some((lat, lng, method, madhab, y, m)) = job {
+    if let Some((lat, lng, method, madhab, y, m, need_current, missing, key, keep)) = job {
         let target = ctl().0 as isize;
         std::thread::spawn(move || {
-            let r = Box::new(times::fetch(lat, lng, &method, &madhab, y, m));
-            let p = Box::into_raw(r) as isize;
+            let current = need_current.then(|| times::fetch(lat, lng, &method, &madhab, y, m));
+            let mut near = vec![];
+            for (yy, mm) in missing {
+                if let Ok(mo) = times::fetch(lat, lng, &method, &madhab, yy, mm) {
+                    near.push(mo);
+                }
+            }
+            times::prune(&keep);
+            let p = Box::into_raw(Box::new(Fetched { current, near, near_key: key })) as isize;
             unsafe {
                 if PostMessageW(Some(HWND(target as _)), WM_TIMES, WPARAM(0), LPARAM(p)).is_err() {
-                    drop(Box::from_raw(p as *mut Result<times::Month, String>));
+                    drop(Box::from_raw(p as *mut Fetched));
                 }
             }
         });
@@ -135,6 +176,8 @@ pub fn apply_settings(n: Settings) {
     if old.times_key() != n.times_key() {
         with_app(|a| {
             a.month = None;
+            a.near.clear();
+            a.near_key.clear();
             a.failed = false;
         });
         ensure_times();
@@ -204,24 +247,28 @@ fn tick() {
         let full = was_busy || key != a.light_key || f.zoom != 1.0 || scenes != a.scene_key;
         a.light_key = key;
         let tip = if f.next.is_empty() { String::new() } else { f.next.clone() };
-        (if full { None } else { a.panel_rect() }, tip)
+        (if full { None } else { Some(a.panel_rects()) }, tip)
     });
-    if let Some((rect, tip)) = plan {
+    if let Some((rects, tip)) = plan {
         tray::tip(ctl(), &tip);
-        invalidate(rect);
+        match rects {
+            Some(rs) => rs.into_iter().for_each(|r| invalidate(Some(r))),
+            None => invalidate(None),
+        }
     }
 }
 
-/// Every monitor's rectangle in `parent`'s client coordinates, and which one is primary.
-fn monitors(parent: HWND) -> (Vec<RECT>, usize) {
+/// Every monitor's rectangle and work area (without the taskbar) in `parent`'s client
+/// coordinates, and which one is primary.
+fn monitors(parent: HWND) -> (Vec<RECT>, Vec<RECT>, usize) {
     unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> BOOL {
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
         if GetMonitorInfoW(m, &mut info).as_bool() {
-            (*(out.0 as *mut Vec<(RECT, bool)>)).push((info.rcMonitor, info.dwFlags & 1 == 1));
+            (*(out.0 as *mut Vec<(RECT, RECT, bool)>)).push((info.rcMonitor, info.rcWork, info.dwFlags & 1 == 1));
         }
         BOOL(1)
     }
-    let mut found: Vec<(RECT, bool)> = vec![];
+    let mut found: Vec<(RECT, RECT, bool)> = vec![];
     unsafe {
         let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut found as *mut _ as isize));
     }
@@ -230,9 +277,10 @@ fn monitors(parent: HWND) -> (Vec<RECT>, usize) {
         unsafe { MapWindowPoints(None, Some(parent), &mut pts) };
         RECT { left: pts[0].x, top: pts[0].y, right: pts[1].x, bottom: pts[1].y }
     };
-    let all: Vec<RECT> = found.iter().map(|(r, _)| to_client(*r)).collect();
-    let primary = found.iter().position(|(_, p)| *p).unwrap_or(0);
-    (all, primary)
+    let all: Vec<RECT> = found.iter().map(|(r, _, _)| to_client(*r)).collect();
+    let work: Vec<RECT> = found.iter().map(|(_, r, _)| to_client(*r)).collect();
+    let primary = found.iter().position(|(_, _, p)| *p).unwrap_or(0);
+    (all, work, primary)
 }
 
 /// Creates the wallpaper window behind the icons (again, after Explorer or screens change).
@@ -275,9 +323,10 @@ fn attach() {
             let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
         }
         WINDOWS.with(|w| w.borrow_mut().1 = hwnd);
-        let (mons, primary) = monitors(host.parent);
+        let (mons, work, primary) = monitors(host.parent);
         with_app(|a| {
             a.monitors = mons;
+            a.work = work;
             a.primary = primary;
         });
     }
@@ -327,7 +376,7 @@ unsafe extern "system" fn wall_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                 let st = a.style();
                 match &a.renderer {
                     Some(r) => {
-                        if let Err(e) = r.paint(ps.hdc, ps.rcPaint, &a.monitors, a.primary, &f, &st) {
+                        if let Err(e) = r.paint(ps.hdc, ps.rcPaint, &a.monitors, &a.work, &a.panel_monitors(), &f, &st) {
                             log(&format!("paint: {e}"));
                         }
                     }
@@ -368,8 +417,8 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 }
                 TIMER_SECOND => {
                     if with_app(|a| !a.busy && !a.paused).unwrap_or(false) {
-                        let r = with_app(|a| a.renderer.as_ref().map(|r| r.clock_rect.get())).flatten();
-                        invalidate(r);
+                        let rs = with_app(|a| a.renderer.as_ref().map(|r| r.clock_rect.borrow().values().copied().collect::<Vec<_>>())).flatten().unwrap_or_default();
+                        rs.into_iter().for_each(|r| invalidate(Some(r)));
                     }
                 }
                 TIMER_MONITOR => {
@@ -378,14 +427,14 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                             return None;
                         }
                         a.sysmon.as_mut()?.sample();
-                        a.renderer.as_ref().map(|r| r.strip_rect.get())
+                        a.renderer.as_ref().map(|r| r.strip_rect.borrow().values().copied().collect::<Vec<_>>())
                     })
                     .flatten();
-                    if let Some(r) = r {
-                        if r.right > r.left {
-                            invalidate(Some(r));
-                        } else {
+                    if let Some(rs) = r {
+                        if rs.is_empty() {
                             invalidate(None);
+                        } else {
+                            rs.into_iter().for_each(|r| invalidate(Some(r)));
                         }
                     }
                 }
@@ -402,17 +451,31 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_TIMES => {
-            let r = *Box::from_raw(lp.0 as *mut Result<times::Month, String>);
-            let ok = r.is_ok();
+            let f = *Box::from_raw(lp.0 as *mut Fetched);
+            let mut ok = true;
             with_app(|a| {
                 a.fetching = false;
-                match r {
-                    Ok(m) => {
+                match f.current {
+                    Some(Ok(m)) => {
                         a.month = Some(m);
                         a.failed = false;
                         a.rotate_reminder(true);
                     }
-                    Err(_) => a.failed = a.month.is_none(),
+                    Some(Err(_)) => {
+                        a.failed = a.month.is_none();
+                        ok = false;
+                    }
+                    None => {}
+                }
+                for m in f.near {
+                    if !a.near.iter().any(|x| x.key == m.key) {
+                        a.near.push(m);
+                    }
+                }
+                if a.near.len() >= 2 {
+                    a.near_key = f.near_key;
+                } else {
+                    ok = false;
                 }
             });
             if !ok {
@@ -456,6 +519,9 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                                     let _ = std::fs::remove_file(settings::data_dir().join(format!("times-{}.json", m.key)));
                                 }
                                 a.month = None;
+                                a.near.clear();
+                                a.near_key.clear();
+                                a.near_retry = 0;
                             });
                             ensure_times();
                         }
@@ -521,6 +587,7 @@ fn snapshot(args: &[String], out: &str) -> windows::core::Result<()> {
     let (w, h) = arg_after(args, "--size").and_then(|v| v.split_once('x')).and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))).unwrap_or((1920, 1080));
     let mut a = App::new(s);
     a.monitors = vec![RECT { left: 0, top: 0, right: w as i32, bottom: h as i32 }];
+    a.work = a.monitors.clone();
     let key = a.wanted_key();
     a.month = times::cached(&key).or_else(|| {
         let (days, _) = a.now();

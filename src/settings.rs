@@ -39,6 +39,13 @@ pub struct Settings {
     pub night_dark: u32,
     // Design
     pub layout: String,
+    /// "together": clock, reminder and times as one centred block; "spread": clock at the top,
+    /// the rest at the bottom.
+    pub spacing: String,
+    /// Prayer times as a "row", "grid" (cards), "list" or "timeline".
+    pub times_style: String,
+    /// System monitor as "lines", "bars", "rings" or "text".
+    pub monitor_style: String,
     pub clock_style: String,
     pub arabic_digits: bool,
     pub seconds: bool,
@@ -63,6 +70,9 @@ pub struct Settings {
     pub battery_saver: bool,
     pub monitor_every: u32,
     pub monitors: String,
+    /// Where the clock panel goes when several screens are connected: "main", "all", or screen
+    /// numbers counted left to right, e.g. "1,3".
+    pub panel_on: String,
 }
 
 impl Default for Settings {
@@ -94,6 +104,9 @@ impl Default for Settings {
             light_follows: true,
             night_dark: 55,
             layout: "column".into(),
+            spacing: "together".into(),
+            times_style: "row".into(),
+            monitor_style: "lines".into(),
             clock_style: "thin".into(),
             arabic_digits: false,
             seconds: false,
@@ -114,6 +127,7 @@ impl Default for Settings {
             battery_saver: true,
             monitor_every: 2,
             monitors: "same".into(),
+            panel_on: "main".into(),
         }
     }
 }

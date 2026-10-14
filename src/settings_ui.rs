@@ -63,6 +63,8 @@ enum Ctl {
     City,
     Pictures,
     Accent,
+    /// Which screens show the clock panel (only when several are connected).
+    Screens,
     About,
 }
 
@@ -113,6 +115,9 @@ fn rows() -> Vec<Row> {
         r(2, "Effects", "Film grain", "", "grain", Ctl::Switch),
         r(3, "", "Layout", "How the information sits on the picture", "layout", seg(&[("column", "Column"), ("centre", "Centre"), ("corner", "Corner"), ("bar", "Bar")])),
         r(3, "", "Side", "Put the text away from your icons", "side", seg(&[("left", "Left"), ("right", "Right")])),
+        r(3, "", "Spacing", "Together keeps the clock, reminder and times as one block", "spacing", seg(&[("together", "Together"), ("spread", "Spread")])),
+        r(3, "", "Prayer times", "How today's times are shown", "times_style", seg(&[("row", "Row"), ("grid", "Cards"), ("list", "List"), ("timeline", "Timeline")])),
+        r(3, "", "System monitor", "CPU, memory, GPU, disk and network", "monitor_style", seg(&[("lines", "Lines"), ("bars", "Bars"), ("rings", "Rings"), ("text", "Compact"), ("off", "Off")])),
         r(3, "", "Behind the text", "", "behind", seg(&[("shade", "Soft shade"), ("glass", "Glass card"), ("none", "Nothing")])),
         r(3, "", "Accent colour", "Headings, the progress line and the current prayer", "accent", Ctl::Accent),
         r(3, "", "Show on wallpaper", "", "", Ctl::Shows),
@@ -129,6 +134,7 @@ fn rows() -> Vec<Row> {
         r(5, "", "Pause during games and full-screen video", "Uses no CPU while you play or watch", "pause_fullscreen", Ctl::Switch),
         r(5, "", "Save power on battery", "Stops the camera drift and the system strip", "battery_saver", Ctl::Switch),
         r(5, "", "System monitor refresh", "Only the small strip is redrawn", "monitor_every", seg(&[("2", "2 s"), ("5", "5 s"), ("10", "10 s")])),
+        r(5, "", "Show the clock and reminders on", "", "panel_on", Ctl::Screens),
         r(5, "", "Monitors", "Each screen can have its own picture", "monitors", seg(&[("same", "Same"), ("different", "Different"), ("main", "Main only")])),
         r(5, "About", "About", "", "", Ctl::About),
     ]
@@ -383,6 +389,8 @@ enum Act {
     Recent(usize),
     PickOk,
     PickCancel,
+    Screen(usize),
+    Identify,
     Absorb,
 }
 
@@ -695,7 +703,7 @@ impl Ui {
         let mut out: Vec<(String, Vec<usize>)> = vec![];
         for (i, r) in self.rows.iter().enumerate() {
             let show = if q.is_empty() { r.sec == self.section } else { r.title.to_lowercase().contains(&q) || r.hint.to_lowercase().contains(&q) };
-            if !show {
+            if !show || (matches!(r.ctl, Ctl::Screens) && screens().0.len() < 2) {
                 continue;
             }
             let group = if q.is_empty() { r.group.to_string() } else { SECTIONS[r.sec].to_string() };
@@ -746,6 +754,7 @@ impl Ui {
             }
             Ctl::Font(_) => 80.0,
             Ctl::About => 100.0,
+            Ctl::Screens => 66.0 + 112.0,
             Ctl::Kinds | Ctl::Shows => (self.chip_lines(&self.chip_labels(i)).len() as f32 * 34.0 + 26.0).max(66.0),
             _ if r.hint.is_empty() && !matches!(r.ctl, Ctl::City) => 56.0,
             _ => 66.0,
@@ -796,7 +805,10 @@ impl Ui {
         let cy = y + band / 2.0;
         let cur = value(s, r.key);
         let ctl_left = match &r.ctl {
-            Ctl::Seg(o) => self.seg(t, th, i, o, &plain(&cur), right, cy)?,
+            Ctl::Seg(o) => {
+                let cur = if r.key == "monitor_style" && !s.show_monitor { "off".to_string() } else { plain(&cur) };
+                self.seg(t, th, i, o, &cur, right, cy)?
+            }
             Ctl::Drop(o) => {
                 let label = o.iter().find(|x| x.0 == plain(&cur)).map(|x| x.1.as_str()).unwrap_or("");
                 self.dropdown(t, th, i, label, 300.0, right, cy)?
@@ -818,6 +830,18 @@ impl Ui {
                 right - 330.0
             }
             Ctl::Accent => self.accent_dots(t, th, s, right, cy)?,
+            Ctl::Screens => {
+                let (rects, main) = screens();
+                let n = rects.len();
+                self.text(t, r.title, &Fam::Ui, rc(l, cy - 20.0, right, cy), 14.0, 400, th.ink, 0)?;
+                self.text(t, &format!("{n} screens found"), &Fam::Ui, rc(l, cy, right, cy + 18.0), 12.0, 400, th.ink2, 0)?;
+                let labels: Vec<String> = ["All screens".to_string(), "Main screen".to_string()].into_iter().chain((1..=n).map(|k| format!("Screen {k}"))).collect();
+                let values: Vec<String> = ["all".to_string(), "main".to_string()].into_iter().chain((1..=n).map(|k| k.to_string())).collect();
+                let opts: Vec<(&str, &str)> = values.iter().zip(labels.iter()).map(|(v, l)| (v.as_str(), l.as_str())).collect();
+                self.seg(t, th, i, &opts, &s.panel_on, right, cy)?;
+                self.screen_map(t, th, s, &rects, main, y + 66.0)?;
+                return Ok(());
+            }
             Ctl::About => {
                 self.about(t, th, y)?;
                 return Ok(());
@@ -1068,6 +1092,44 @@ impl Ui {
             self.hit(r, act);
         }
         Ok(x0 - 6.0)
+    }
+
+    /// The connected screens drawn as they are arranged, the ones with the clock outlined.
+    #[allow(clippy::too_many_arguments)]
+    fn screen_map(&self, t: &ID2D1RenderTarget, th: &Theme, s: &Settings, rects: &[RECT], main: usize, y: f32) -> Result<()> {
+        let (l, right) = (MX + 16.0, MR - 16.0);
+        let shown = shown_screens(&s.panel_on, rects.len(), main);
+        let (x0, y0) = (rects.iter().map(|r| r.left).min().unwrap_or(0), rects.iter().map(|r| r.top).min().unwrap_or(0));
+        let (x1, y1) = (rects.iter().map(|r| r.right).max().unwrap_or(1), rects.iter().map(|r| r.bottom).max().unwrap_or(1));
+        let (bw, bh) = (right - l - 180.0, 92.0);
+        let k = (bw / (x1 - x0).max(1) as f32).min(bh / (y1 - y0).max(1) as f32);
+        for (n, r) in rects.iter().enumerate() {
+            let gap = 3.0;
+            let m = rc(l + (r.left - x0) as f32 * k + gap, y + (r.top - y0) as f32 * k + gap, l + (r.right - x0) as f32 * k - gap, y + (r.bottom - y0) as f32 * k - gap);
+            let on = shown.contains(&(n + 1));
+            rr(t, m, 6.0, Some(hexc(0x2a3140)), None)?;
+            if on {
+                // a small panel at the right, like the real clock column
+                let w = m.right - m.left;
+                rr(t, rc(m.right - w * 0.34, m.top + 8.0, m.right - 8.0, m.bottom - 8.0), 3.0, Some(alpha(hexc(0xffffff), 0.18)), None)?;
+            }
+            self.text(t, &(n + 1).to_string(), &Fam::Display, m, 22.0, 600, hexc(0xffffff), 1)?;
+            let tag = format!("{} × {}{}", r.right - r.left, r.bottom - r.top, if n == main { " · main" } else { "" });
+            self.text(t, &tag, &Fam::Ui, rc(m.left + 6.0, m.bottom - 18.0, m.right - 4.0, m.bottom - 2.0), 10.0, 400, alpha(hexc(0xffffff), 0.85), 0)?;
+            let ring = if on { th.acc } else if self.hovered(Act::Screen(n + 1)) { alpha(th.ink, 0.5) } else { th.ctlb };
+            rr(t, rc(m.left - 1.0, m.top - 1.0, m.right + 1.0, m.bottom + 1.0), 7.0, None, Some(ring))?;
+            if on {
+                rr(t, rc(m.left - 2.0, m.top - 2.0, m.right + 2.0, m.bottom + 2.0), 8.0, None, Some(ring))?;
+            }
+            self.hit(m, Act::Screen(n + 1));
+        }
+        let label = "Identify screens";
+        let w = self.measure(label, 13.5, 400) + 30.0;
+        let b = rc(right - w, y + 30.0, right, y + 62.0);
+        rr(t, b, 6.0, Some(if self.hovered(Act::Identify) { th.sel } else { th.ctl }), Some(th.ctlb))?;
+        self.text(t, label, &Fam::Ui, b, 13.5, 400, th.ink, 1)?;
+        self.hit(b, Act::Identify);
+        Ok(())
     }
 
     fn about(&self, t: &ID2D1RenderTarget, th: &Theme, y: f32) -> Result<()> {
@@ -1553,7 +1615,23 @@ fn act(a: Act, r: R, x: f32, y: f32) {
                     _ => None,
                 })
             });
-            if let Some((key, v)) = opt {
+            let screens_row = UI.with(|u| u.borrow().as_ref().map(|u| matches!(u.rows[row].ctl, Ctl::Screens))).unwrap_or(false);
+            if screens_row {
+                let mut n = s.clone();
+                n.panel_on = match k {
+                    0 => "all".into(),
+                    1 => "main".into(),
+                    k => (k - 1).to_string(),
+                };
+                apply(n);
+            } else if let Some(("monitor_style", v)) = opt {
+                let mut n = s.clone();
+                n.show_monitor = v != "off";
+                if v != "off" {
+                    n.monitor_style = v.into();
+                }
+                apply(n);
+            } else if let Some((key, v)) = opt {
                 apply(with(&s, key, typed(&value(&s, key), v)));
             }
         }
@@ -1716,6 +1794,23 @@ fn act(a: Act, r: R, x: f32, y: f32) {
                 }
             }
         },
+        Act::Screen(k) => {
+            // pick any combination by clicking the screens
+            let (rects, main) = screens();
+            let mut set = shown_screens(&s.panel_on, rects.len(), main);
+            if set.contains(&k) {
+                if set.len() > 1 {
+                    set.retain(|x| *x != k);
+                }
+            } else {
+                set.push(k);
+            }
+            set.sort();
+            let mut n = s.clone();
+            n.panel_on = if set.len() == rects.len() { "all".into() } else { set.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",") };
+            apply(n);
+        }
+        Act::Identify => identify(),
         Act::Absorb => {}
     }
     redraw();
@@ -2067,5 +2162,102 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+// ---------------- screens ----------------
+
+/// The connected screens in screen coordinates, numbered left to right (like `App::screen_order`),
+/// and the position of the main one in that list.
+fn screens() -> (Vec<RECT>, usize) {
+    unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> BOOL {
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(m, &mut info).as_bool() {
+            (*(out.0 as *mut Vec<(RECT, bool)>)).push((info.rcMonitor, info.dwFlags & 1 == 1));
+        }
+        BOOL(1)
+    }
+    let mut found: Vec<(RECT, bool)> = vec![];
+    unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut found as *mut _ as isize));
+    }
+    found.sort_by_key(|(r, _)| (r.left, r.top));
+    let main = found.iter().position(|(_, p)| *p).unwrap_or(0);
+    (found.into_iter().map(|(r, _)| r).collect(), main)
+}
+
+/// Screen numbers (1-based) that show the clock for a `panel_on` value.
+fn shown_screens(panel_on: &str, n: usize, main: usize) -> Vec<usize> {
+    match panel_on {
+        "all" => (1..=n).collect(),
+        "main" | "" => vec![main + 1],
+        list => {
+            let v: Vec<usize> = list.split(',').filter_map(|x| x.trim().parse().ok()).filter(|k| (1..=n).contains(k)).collect();
+            if v.is_empty() {
+                vec![main + 1]
+            } else {
+                v
+            }
+        }
+    }
+}
+
+/// Shows a big number in the middle of every screen for three seconds.
+fn identify() {
+    unsafe extern "system" fn number(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        match msg {
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let hdc = BeginPaint(hwnd, &mut ps);
+                let mut r = RECT::default();
+                let _ = GetClientRect(hwnd, &mut r);
+                let bg = CreateSolidBrush(COLORREF(0x0020_1a16));
+                FillRect(hdc, &r, bg);
+                let _ = DeleteObject(bg.into());
+                let n = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+                let font = CreateFontW(-(r.bottom * 3 / 4), 0, 0, 0, 600, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, w!("Segoe UI"));
+                let old = SelectObject(hdc, font.into());
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, COLORREF(0x00ff_ffff));
+                let mut text: Vec<u16> = n.to_string().encode_utf16().collect();
+                DrawTextW(hdc, &mut text, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                SelectObject(hdc, old);
+                let _ = DeleteObject(font.into());
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_TIMER => {
+                let _ = DestroyWindow(hwnd);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wp, lp),
+        }
+    }
+    unsafe {
+        let inst = GetModuleHandleW(None).unwrap_or_default();
+        RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(number), hInstance: inst.into(), lpszClassName: w!("MiqaatIdentify"), ..Default::default() });
+        for (n, r) in screens().0.iter().enumerate() {
+            let size = ((r.bottom - r.top) / 3).max(160);
+            let (x, y) = (r.left + (r.right - r.left - size) / 2, r.top + (r.bottom - r.top - size) / 2);
+            if let Ok(h) = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+                w!("MiqaatIdentify"),
+                w!(""),
+                WS_POPUP,
+                x,
+                y,
+                size,
+                size,
+                None,
+                None,
+                Some(inst.into()),
+                None,
+            ) {
+                SetWindowLongPtrW(h, GWLP_USERDATA, (n + 1) as isize);
+                let _ = SetLayeredWindowAttributes(h, COLORREF(0), 225, LWA_ALPHA);
+                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+                SetTimer(Some(h), 1, 3000, None);
+            }
+        }
     }
 }
