@@ -42,7 +42,10 @@ pub struct Settings {
     pub clock_style: String,
     pub arabic_digits: bool,
     pub seconds: bool,
+    /// A preset name (gold, emerald, sky, rose, pearl) or a custom "#RRGGBB".
     pub accent: String,
+    /// Custom colours picked recently, newest first.
+    pub recent_colors: Vec<String>,
     pub text_size: u32,
     pub behind: String,
     pub drift: bool,
@@ -95,6 +98,7 @@ impl Default for Settings {
             arabic_digits: false,
             seconds: false,
             accent: "gold".into(),
+            recent_colors: vec![],
             text_size: 100,
             behind: "shade".into(),
             drift: false,

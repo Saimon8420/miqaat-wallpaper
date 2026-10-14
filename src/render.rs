@@ -66,7 +66,39 @@ pub struct Style {
     pub show_times: bool,
 }
 
+/// A built-in font as a DirectWrite collection, and its family name as DirectWrite sees it
+/// (which can differ from the marketing name).
+pub fn load_font(dwrite: &IDWriteFactory5, loader: &IDWriteInMemoryFontFileLoader, f: &crate::assets::Font) -> Result<(IDWriteFontCollection1, HSTRING)> {
+    unsafe {
+        let builder: IDWriteFontSetBuilder1 = dwrite.CreateFontSetBuilder()?.cast()?;
+        for data in f.files {
+            let file = loader.CreateInMemoryFontFileReference(dwrite, data.as_ptr() as _, data.len() as u32, None::<&windows::core::IUnknown>)?;
+            builder.AddFontFile(&file)?;
+        }
+        let coll = dwrite.CreateFontCollectionFromFontSet(&builder.CreateFontSet()?)?;
+        let names = coll.GetFontFamily(0)?.GetFamilyNames()?;
+        let mut buf = vec![0u16; names.GetStringLength(0)? as usize + 1];
+        names.GetString(0, &mut buf)?;
+        buf.pop();
+        Ok((coll, HSTRING::from_wide(&buf)))
+    }
+}
+
+/// "#RRGGBB" -> 0..1 RGB.
+pub fn parse_hex(s: &str) -> Option<[f32; 3]> {
+    let h = s.strip_prefix('#')?;
+    if h.len() != 6 {
+        return None;
+    }
+    let n = u32::from_str_radix(h, 16).ok()?;
+    Some([(n >> 16 & 255) as f32 / 255.0, (n >> 8 & 255) as f32 / 255.0, (n & 255) as f32 / 255.0])
+}
+
+/// A preset name or a custom "#RRGGBB" colour.
 pub fn accent(name: &str) -> [f32; 3] {
+    if let Some(c) = parse_hex(name) {
+        return c;
+    }
     match name {
         "emerald" => [0.40, 0.82, 0.64],
         "sky" => [0.52, 0.76, 0.96],
@@ -141,20 +173,7 @@ impl Renderer {
             let loader = dwrite.CreateInMemoryFontFileLoader()?;
             dwrite.RegisterFontFileLoader(&loader)?;
             let pick = |list: &'static [crate::assets::Font], name: &str| list.iter().find(|f| f.name == name).unwrap_or(&list[0]);
-            let load = |f: &crate::assets::Font| -> Result<(IDWriteFontCollection1, HSTRING)> {
-                let builder: IDWriteFontSetBuilder1 = dwrite.CreateFontSetBuilder()?.cast()?;
-                for data in f.files {
-                    let file = loader.CreateInMemoryFontFileReference(&dwrite, data.as_ptr() as _, data.len() as u32, None::<&windows::core::IUnknown>)?;
-                    builder.AddFontFile(&file)?;
-                }
-                let coll = dwrite.CreateFontCollectionFromFontSet(&builder.CreateFontSet()?)?;
-                // The family name as DirectWrite sees it (it can differ from the marketing name).
-                let names = coll.GetFontFamily(0)?.GetFamilyNames()?;
-                let mut buf = vec![0u16; names.GetStringLength(0)? as usize + 1];
-                names.GetString(0, &mut buf)?;
-                buf.pop();
-                Ok((coll, HSTRING::from_wide(&buf)))
-            };
+            let load = |f: &crate::assets::Font| load_font(&dwrite, &loader, f);
             let fonts = Fonts {
                 ar: load(pick(crate::assets::ARABIC_FONTS, font_ar))?,
                 bn: load(pick(crate::assets::BANGLA_FONTS, font_bn))?,
@@ -679,7 +698,7 @@ impl Drop for Renderer {
 
 /// Decodes `src`, scales it to cover `w`×`h` (cropping the middle) and applies the picture
 /// effect. Also returns, for the glass card, a soft blurred copy at a third of the size.
-fn load_photo(src: &Photo, w: u32, h: u32, effect: &str, grain: bool, glass: bool) -> Result<(IWICBitmap, Option<IWICBitmap>)> {
+pub(crate) fn load_photo(src: &Photo, w: u32, h: u32, effect: &str, grain: bool, glass: bool) -> Result<(IWICBitmap, Option<IWICBitmap>)> {
     unsafe {
         let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
         let dec = match src {
