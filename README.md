@@ -35,7 +35,7 @@ The **[live demo](https://saimon8420.github.io/miqaat-wallpaper/)** is an intera
 
 ## Install
 
-1. **Download** [`MiqaatWallpaper-Setup.exe`](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe) (about 14 MB) from the [latest release](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest).
+1. **Download** [`MiqaatWallpaper-Setup.exe`](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe) (about 30 MB) from the [latest release](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest).
 2. **Run it.** Windows may say *"Windows protected your PC"* because the app is new and not code-signed. Click **More info**, then **Run anyway**.
 3. **Choose Yes** to install for your account only. No admin rights are needed. It copies itself to `%LOCALAPPDATA%\Programs\Miqaat Wallpaper`, adds a Start menu entry and starts with Windows. Choose **No** to just try it once without installing.
 4. **Set your city.** The settings window opens on the first run. After that, right-click the moon icon near the clock in the taskbar and choose **Settings…**. Every change shows on the wallpaper straight away.
@@ -61,17 +61,17 @@ No text was typed from memory. A build script pulls every word from published da
 
 | | Source | Count |
 |---|---|---|
-| Quran | [holy-quran](https://www.npmjs.com/package/holy-quran) (MIT): Hafs text, Sahih International English, Bangla | 45 short, complete verses |
-| Hadith | [hadith-api](https://github.com/fawazahmed0/hadith-api) (public domain), with gradings | 34 from Bukhari, Muslim, Tirmidhi and an-Nawawi's Forty |
-| Adhkar | *Hisn al-Muslim* via [hisnmuslim.com](https://www.hisnmuslim.com), with item numbers | 76 duas, dhikr, istighfar and durood |
+| Quran | [holy-quran](https://www.npmjs.com/package/holy-quran) (MIT): Hafs text, Sahih International English, Bangla | 165 short, complete verses |
+| Hadith | [hadith-api](https://github.com/fawazahmed0/hadith-api) (public domain), with gradings | 138 from Bukhari, Muslim, Tirmidhi and all of an-Nawawi's Forty |
+| Adhkar | *Hisn al-Muslim* via [hisnmuslim.com](https://www.hisnmuslim.com), with item numbers | 125 duas, dhikr, istighfar and durood, all with Bangla |
 
-The library is a 190 KB file built into the app, so reminders never need the internet. Prayer times are fetched once a month and saved. If you're offline, the saved month keeps working.
+The library is a 650 KB file built into the app, so reminders never need the internet. Prayer times are fetched once a month and saved. If you're offline, the saved month keeps working.
 
 Days whose special worship is disputed are deliberately left out.
 
 ## How it works
 
-- **Rust + Win32**, with no web view and no runtime. One 14 MB exe holds the photos, fonts and content.
+- **Rust + Win32**, with no web view and no runtime. One 30 MB exe holds the photos (up to 4K), fonts and content.
 - **Behind the icons.** The wallpaper window is a child of Explorer's desktop `WorkerW`. On Windows 11 24H2 and later, that window sits inside `Progman` and the desktop has no GDI surface, so the wallpaper is a layered child window.
 - **Drawn in software** with Direct2D and DirectWrite on the CPU. A GPU render target would load the graphics driver into the process (about 100 MB). Each photo is decoded once at the monitor's size.
 - **Small repaints.** The text panel redraws once a minute and the whole picture only when the light changes. With those options on, only the clock redraws each second and only the system strip every 2 seconds. Nothing redraws while a full-screen game or video is running.
