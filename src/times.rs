@@ -112,19 +112,29 @@ pub fn fetch(lat: f64, lng: f64, method: &str, madhab: &str, year: i32, month: u
     let m = Month { key: month_key(lat, lng, method, madhab, year, month), offset: off, days };
     let dir = crate::settings::data_dir();
     let _ = std::fs::create_dir_all(&dir);
-    // Drop older months for any city, then save this one.
-    if let Ok(rd) = std::fs::read_dir(&dir) {
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().to_string();
-            if n.starts_with("times-") && n != format!("times-{}.json", m.key) {
-                let _ = std::fs::remove_file(e.path());
-            }
-        }
-    }
     if let Ok(s) = serde_json::to_string(&m) {
         let _ = std::fs::write(cache_path(&m.key), s);
     }
     Ok(m)
+}
+
+/// Deletes saved months other than `keep` (old months, other cities or methods).
+pub fn prune(keep: &[String]) {
+    if let Ok(rd) = std::fs::read_dir(crate::settings::data_dir()) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if n.starts_with("times-") && !keep.iter().any(|k| n == format!("times-{k}.json")) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+/// The months before and after `year`-`month`.
+pub fn neighbours(year: i32, month: u32) -> [(i32, u32); 2] {
+    let prev = if month == 1 { (year - 1, 12) } else { (year, month - 1) };
+    let next = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    [prev, next]
 }
 
 // ---------- calendar arithmetic (proleptic Gregorian, days since 1970-01-01) ----------
