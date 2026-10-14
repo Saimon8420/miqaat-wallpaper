@@ -2,7 +2,7 @@
 
 ## Photos
 
-All 20 pictures come from Wikimedia Commons. They were cropped to 16:9 and resized to 1920×1080; each stays under its original licence (CC BY-SA pictures are shared under the same licence). Thank you to every photographer.
+All 20 pictures come from Wikimedia Commons. They were cropped to 16:9 and kept at up to 3840×2160 (4K), the original size where it is smaller (`tools/fetch_scenes.py`); each stays under its original licence (CC BY-SA pictures are shared under the same licence). Thank you to every photographer.
 
 | Picture | Author | Licence | Source |
 |---|---|---|---|
