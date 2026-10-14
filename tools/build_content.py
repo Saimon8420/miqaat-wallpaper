@@ -127,11 +127,62 @@ def bangla_hisn():
     return _bangla
 
 
+def english(t: str) -> str:
+    """The book's English, tidied for a wallpaper. The book writes "(dua)(three times)(note)":
+    each bracketed group is either more of the dua (kept as text), a short count such as "three
+    times" (kept in brackets) or a translator's gloss such as "shirk: …" or "Note: …" (dropped)."""
+    t = clean(t).split("[In the evening:]")[0].strip()
+    pieces, depth, cur = [], 0, ""
+    for ch in t:
+        if ch == "(":
+            if depth == 0 and cur.strip():
+                pieces.append(("text", cur))
+                cur = ""
+            elif depth > 0:
+                cur += ch
+            depth += 1
+        elif ch == ")" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                pieces.append(("group", cur))
+                cur = ""
+            else:
+                cur += ch
+        else:
+            cur += ch
+    if cur.strip():
+        pieces.append(("text" if depth == 0 else "group", cur))
+
+    def gloss(p: str) -> bool:
+        # "shirk: …", "Furqan: …", "send prayers: …" but not "He said: …"
+        return bool(re.match(r"(Note:|…|\.\.\.|i\.e\.|To be said|\(al\)|[A-Z][A-Za-z’'-]+:\s|[a-z][a-z’'-]+( [a-z]+)?:\s)", p.strip()))
+
+    out = []
+    for n, (kind, p) in enumerate(pieces):
+        p = p.strip()
+        if not p or (kind == "group" and n > 0 and gloss(p)):
+            continue
+        if kind == "group" and "(" in p:
+            out.append(english(p))  # groups inside groups
+        elif kind == "group" and len(p) <= 40 and not p.endswith("."):
+            out.append(f"({p})")
+        else:
+            out.append(p)
+    return re.sub(r"(\S)\(", r" (", clean(" ".join(out)))
+
+
+def hisn_json(text: str):
+    """The site's JSON has a few slips: raw tabs inside strings and, in one chapter, a title
+    missing its closing quote. Both are mended before parsing."""
+    text = re.sub(r'^(\s*"[^"\n]*?):\s*$', r'\1":', text, flags=re.M)
+    return json.loads(text, strict=False)
+
+
 def adhkar():
     items = []
     for cid, slot in ADHKAR_CHAPTERS.items():
-        ar = json.loads(get(f"https://www.hisnmuslim.com/api/ar/{cid}.json", RAW / f"hisn-ar-{cid}.json"))
-        en = json.loads(get(f"https://www.hisnmuslim.com/api/en/{cid}.json", RAW / f"hisn-en-{cid}.json"))
+        ar = hisn_json(get(f"https://www.hisnmuslim.com/api/ar/{cid}.json", RAW / f"hisn-ar-{cid}.json"))
+        en = hisn_json(get(f"https://www.hisnmuslim.com/api/en/{cid}.json", RAW / f"hisn-en-{cid}.json"))
         ar_rows, en_rows = list(ar.values())[0], {r["ID"]: r for r in list(en.values())[0]}
         for r in ar_rows:
             e = en_rows.get(r["ID"], {})
@@ -141,7 +192,7 @@ def adhkar():
             if len(text) > 420:  # too long to read on a wallpaper; still in the book
                 continue
             kind = {"istighfar": "istighfar", "durood": "durood", "dhikr": "dhikr"}.get(slot, "dua")
-            items.append({"kind": kind, "slot": slot, "ar": text, "en": clean(e.get("TRANSLATED_TEXT", "")).split("[In the evening:]")[0].strip().removeprefix("(").removesuffix(")"), "bn": bangla_hisn().get(int(r["ID"]), ""),
+            items.append({"kind": kind, "slot": slot, "ar": text, "en": english(e.get("TRANSLATED_TEXT", "")), "bn": bangla_hisn().get(int(r["ID"]), ""),
                           "translit": clean(e.get("LANGUAGE_ARABIC_TRANSLATED_TEXT", "")), "repeat": r.get("REPEAT", 1),
                           "ref": f"Hisn al-Muslim {r['ID']}"})
     return items
