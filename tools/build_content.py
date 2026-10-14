@@ -6,6 +6,7 @@ Downloads (cached in tools/raw): hadith-api editions and Hisn al-Muslim chapters
 item so a person can check it before release. Nothing here is typed by hand except references.
 """
 
+import html
 import json
 import pathlib
 import re
@@ -88,12 +89,44 @@ def hadith():
         # Bukhari and Muslim are sahih by consensus; for the others prefer al-Albani's grading.
         albani = [g for g in en.get("grades", []) if "Albani" in g["name"]]
         grade = "Sahih" if coll in ("bukhari", "muslim") else (f"{albani[0]['grade']} (al-Albani)" if albani else (grades[0] if grades else ""))
-        items.append({"kind": "hadith", "tags": tags, "long": len(clean(en["text"])) > 380, "ar": clean(ar["text"]), "en": clean(en["text"]), "bn": clean(bn["text"]) if bn else "",
+        items.append({"kind": "hadith", "tags": tags, "long": len(clean(en["text"])) > 380, "ar": clean(re.sub(r"\[[^\]]*\]", "", ar["text"])), "en": clean(en["text"]), "bn": clean(bn["text"]) if bn else "",
                       "ref": f"{NAMES[coll]} {num}", "grade": grade})
     return items
 
 
 # ---------------- Hisn al-Muslim ----------------
+BN_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+_bangla = {}
+
+
+def bangla_hisn():
+    """The book's published Bangla edition, keyed by the global item number.
+
+    The API only has Arabic and English, so this reads the site's Bangla pages
+    (hisnmuslim.com/i/bn/N). Each item is "75-(1) text(1) ........ footnotes"; only the
+    text is kept, without the item number, footnote markers or footnotes.
+    """
+    if _bangla:
+        return _bangla
+    for page in range(0, 140):
+        try:
+            s = get(f"https://hisnmuslim.com/i/bn/{page}", RAW / f"hisn-bn-page-{page}.html")
+        except Exception:
+            continue
+        a, b = s.find('class="site-post-meta"'), s.find('class="pager"')
+        blocks = re.split(r'data-audio="http://www.hisnmuslim.com/audio/ar/(\d+)\.mp3"', s[a:b])
+        for i in range(1, len(blocks), 2):
+            t = html.unescape(re.sub(r"<[^>]+>", "\n", blocks[i + 1]))
+            t = re.split(r"\n\s*(?:\.{5,}|-{5,})", t)[0]  # footnotes start after a dotted or dashed line
+            t = clean(re.sub(r'<a class="fa".*$', "", t, flags=re.S).replace(">", " "))
+            t = re.sub(r"^[০-৯]+\s*-\s*(?:\([০-৯]+\)\s*)?", "", t)  # "৭৫-(১) " or "২৩৭- "
+            t = re.sub(r"\s*\([০-৯]+\)", "", t)  # footnote markers
+            t = re.sub(r"\s*[^।]*হাদীস নং [০-৯]+।$", "", t)  # a trailing source line left inside the text
+            if t:
+                _bangla.setdefault(int(blocks[i]), t)
+    return _bangla
+
+
 def adhkar():
     items = []
     for cid, slot in ADHKAR_CHAPTERS.items():
@@ -104,10 +137,11 @@ def adhkar():
             e = en_rows.get(r["ID"], {})
             # The book wraps each dhikr in (( )) and its translation in ( ); not needed on a wallpaper.
             text = clean(r["ARABIC_TEXT"]).removeprefix("((").removesuffix(".").removesuffix("))").strip()
+            text = clean(re.sub(r"\[\s*وإذا أمسى[^\]]*\]?", "", text)).removesuffix(".").removesuffix("))").strip()  # the book's evening note
             if len(text) > 420:  # too long to read on a wallpaper; still in the book
                 continue
             kind = {"istighfar": "istighfar", "durood": "durood", "dhikr": "dhikr"}.get(slot, "dua")
-            items.append({"kind": kind, "slot": slot, "ar": text, "en": clean(e.get("TRANSLATED_TEXT", "")).split("[In the evening:]")[0].strip().removeprefix("(").removesuffix(")"), "bn": "",
+            items.append({"kind": kind, "slot": slot, "ar": text, "en": clean(e.get("TRANSLATED_TEXT", "")).split("[In the evening:]")[0].strip().removeprefix("(").removesuffix(")"), "bn": bangla_hisn().get(int(r["ID"]), ""),
                           "translit": clean(e.get("LANGUAGE_ARABIC_TRANSLATED_TEXT", "")), "repeat": r.get("REPEAT", 1),
                           "ref": f"Hisn al-Muslim {r['ID']}"})
     return items
