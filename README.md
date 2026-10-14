@@ -2,13 +2,11 @@
 
 A calm live wallpaper for Windows. Today's prayer times, the next prayer, and one authentic reminder at a time with its source, drawn behind your desktop icons on a photo of a great mosque or a quiet landscape. It's written in Rust and uses about 30 MB of memory.
 
-**[Download for Windows](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe)** · [Live demo](https://saimon8420.github.io/miqaat-wallpaper/) · [How to install](#install)
+**[Download for Windows](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe)** · [How to install](#install)
 
 ![Miqaat Wallpaper on the desktop: the Kaaba, the clock, the next prayer, evening adhkar and today's prayer times](docs/screenshots/01-column-kaaba.jpg)
 
-## Try it in your browser
-
-The **[live demo](https://saimon8420.github.io/miqaat-wallpaper/)** is an interactive preview of the wallpaper and its settings window. Pick a city, a calculation method, a picture, a layout or a time of day and see what your desktop would look like. It uses real prayer times from the Miqaat API.
+## Screenshots
 
 | | |
 |---|---|
