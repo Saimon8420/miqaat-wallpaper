@@ -175,11 +175,15 @@ pub fn uninstall() {
     }
     let _ = std::fs::remove_file(shortcut());
     let _ = std::fs::remove_dir_all(crate::settings::data_dir());
-    // A running exe can't delete itself: let a hidden shell do it a moment after we exit.
+    // A running exe can't delete itself, and the Windows "delete at next restart" route needs
+    // admin rights, which a per-user app doesn't have. So, like the Squirrel installer used by
+    // Discord and Slack, a short-lived Command Prompt removes the folder once we have exited.
+    // It is started by full path so no other "cmd.exe" can be picked up.
     let dir = install_dir();
     if dir.exists() {
         use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("cmd.exe")
+        let root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| r"C:\Windows".into());
+        let _ = std::process::Command::new(root.join("System32").join("cmd.exe"))
             .raw_arg(format!("/c ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"", dir.display()))
             .creation_flags(CREATE_NO_WINDOW.0)
             .spawn();
