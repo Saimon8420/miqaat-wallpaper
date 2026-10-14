@@ -90,7 +90,7 @@ impl Default for Settings {
             show_reminder: true,
             show_special: true,
             show_times: true,
-            show_monitor: false,
+            show_monitor: true,
             light_follows: true,
             night_dark: 55,
             layout: "column".into(),
