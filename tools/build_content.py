@@ -78,12 +78,44 @@ def find(lang: str, coll: str, num: int):
     return hits[0] if hits else None
 
 
+def nawawi_source(t: str):
+    """An-Nawawi ends each hadith with where it is found ("[Bukhari & Muslim]", "related by
+    at-Tirmidhi, who said it is hasan"). That note becomes the grade label and leaves the text."""
+    t = clean(t)
+    low = t.lower()
+    bukhari = "bukhari" in low[-160:]
+    muslim = "muslim]" in low[-160:] or "[muslim" in low[-160:]
+    if bukhari and muslim:
+        grade = "Sahih (al-Bukhari and Muslim)"
+    elif bukhari:
+        grade = "Sahih (al-Bukhari)"
+    elif muslim:
+        grade = "Sahih (Muslim)"
+    elif "hasan saheeh" in low or "good and sound" in low:
+        grade = "Hasan Sahih"
+    elif "saheeh" in low[-200:]:
+        grade = "Sahih chain"
+    elif "hasan" in low[-200:] or "good chain" in low:
+        grade = "Hasan"
+    else:
+        grade = ""
+    cut = re.search(r"(\s*\[[^\]]*\])+\s*$", t)
+    if cut:
+        t = t[: cut.start()]
+    return t.strip(), grade
+
+
 def hadith():
     items = []
     for coll, num, tags in HADITH:
         en, ar, bn = find("eng", coll, num), find("ara", coll, num), find("ben", coll, num)
         if not en or not ar:
             print(f"!! missing {coll} {num}")
+            continue
+        if coll == "nawawi":
+            text, grade = nawawi_source(en["text"])
+            items.append({"kind": "hadith", "tags": tags, "long": len(text) > 380, "ar": clean(re.sub(r"\[[^\]]*\]", "", ar["text"])),
+                          "en": text, "bn": clean(bn["text"]) if bn else "", "ref": f"{NAMES[coll]} {num}", "grade": grade})
             continue
         grades = [f"{g['grade']} ({g['name']})" for g in en.get("grades", [])]
         # Bukhari and Muslim are sahih by consensus; for the others prefer al-Albani's grading.
@@ -191,8 +223,11 @@ def adhkar():
             text = clean(re.sub(r"\[\s*وإذا أمسى[^\]]*\]?", "", text)).removesuffix(".").removesuffix("))").strip()  # the book's evening note
             if len(text) > 420:  # too long to read on a wallpaper; still in the book
                 continue
+            meaning = english(e.get("TRANSLATED_TEXT", ""))
+            if len(meaning) < 8 or meaning.startswith(("i.e.", "Note:")):  # no translation, only a note
+                continue
             kind = {"istighfar": "istighfar", "durood": "durood", "dhikr": "dhikr"}.get(slot, "dua")
-            items.append({"kind": kind, "slot": slot, "ar": text, "en": english(e.get("TRANSLATED_TEXT", "")), "bn": bangla_hisn().get(int(r["ID"]), ""),
+            items.append({"kind": kind, "slot": slot, "ar": text, "en": meaning, "bn": bangla_hisn().get(int(r["ID"]), ""),
                           "translit": clean(e.get("LANGUAGE_ARABIC_TRANSLATED_TEXT", "")), "repeat": r.get("REPEAT", 1),
                           "ref": f"Hisn al-Muslim {r['ID']}"})
     return items
