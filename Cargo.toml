@@ -1,6 +1,6 @@
 [package]
 name = "miqaat-wallpaper"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2021"
 description = "A calm Windows live wallpaper: prayer times from the Miqaat API and authentic reminders."
 license = "MIT"
