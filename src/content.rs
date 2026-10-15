@@ -71,13 +71,48 @@ pub struct Picker {
     decks: HashMap<String, (Vec<usize>, usize)>,
     seed: u64,
     turn: usize,
+    /// Where to keep the decks between runs (None in tests and snapshots).
+    save_to: Option<std::path::PathBuf>,
+}
+
+/// A deck as saved on disk: the order by reference, and how far through it we are.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct SavedDecks {
+    turn: usize,
+    decks: HashMap<String, (Vec<String>, usize)>,
 }
 
 impl Picker {
     pub fn new() -> Self {
         let lib: Library = serde_json::from_str(crate::assets::CONTENT).unwrap_or(Library { items: vec![] });
         let seed = crate::times::utc_seconds() as u64 | 1;
-        Picker { items: lib.items, decks: HashMap::new(), seed, turn: 0 }
+        Picker { items: lib.items, decks: HashMap::new(), seed, turn: 0, save_to: None }
+    }
+
+    /// Like `new`, but continues the decks saved in `path` (and keeps saving there).
+    pub fn saved(path: std::path::PathBuf) -> Self {
+        let mut p = Picker::new();
+        if let Some(saved) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<SavedDecks>(&s).ok()) {
+            p.turn = saved.turn;
+            let by_ref: HashMap<&str, usize> = p.items.iter().enumerate().map(|(i, it)| (it.reference.as_str(), i)).collect();
+            for (key, (refs, pos)) in saved.decks {
+                let idx: Vec<usize> = refs.iter().filter_map(|r| by_ref.get(r.as_str()).copied()).collect();
+                // a deck from an older library (items added or removed) is simply reshuffled
+                if idx.len() == refs.len() && !idx.is_empty() {
+                    p.decks.insert(key, (idx, pos));
+                }
+            }
+        }
+        p.save_to = Some(path);
+        p
+    }
+
+    fn save(&self) {
+        let Some(path) = &self.save_to else { return };
+        let decks = self.decks.iter().map(|(k, (idx, pos))| (k.clone(), (idx.iter().map(|&i| self.items[i].reference.clone()).collect(), *pos))).collect();
+        if let Ok(s) = serde_json::to_string(&SavedDecks { turn: self.turn, decks }) {
+            let _ = std::fs::write(path, s);
+        }
     }
 
     fn rand(&mut self) -> u64 {
@@ -90,7 +125,8 @@ impl Picker {
 
     /// Next item from the deck `key`, building and shuffling it on first use.
     fn draw(&mut self, key: &str, keep: impl Fn(&Item) -> bool) -> Option<Item> {
-        if !self.decks.contains_key(key) {
+        let fits = self.decks.get(key).map(|(idx, _)| idx.iter().all(|&i| keep(&self.items[i]))).unwrap_or(false);
+        if !fits {
             let mut idx: Vec<usize> = (0..self.items.len()).filter(|&i| keep(&self.items[i])).collect();
             for i in (1..idx.len()).rev() {
                 let j = (self.rand() % (i as u64 + 1)) as usize;
@@ -98,12 +134,23 @@ impl Picker {
             }
             self.decks.insert(key.to_string(), (idx, 0));
         }
-        let (deck, pos) = self.decks.get_mut(key)?;
-        if deck.is_empty() {
+        let (len, pos) = self.decks.get(key).map(|(d, p)| (d.len(), *p))?;
+        if len == 0 {
             return None;
         }
-        let item = self.items[deck[*pos % deck.len()]].clone();
-        *pos += 1;
+        if pos >= len {
+            // the whole deck has been shown: shuffle a new round
+            let swaps: Vec<(usize, usize)> = (1..len).rev().map(|i| (i, (self.rand() % (i as u64 + 1)) as usize)).collect();
+            let (deck, p) = self.decks.get_mut(key)?;
+            for (i, j) in swaps {
+                deck.swap(i, j);
+            }
+            *p = 0;
+        }
+        let (deck, p) = self.decks.get_mut(key)?;
+        let item = self.items[deck[*p]].clone();
+        *p += 1;
+        self.save();
         Some(item)
     }
 
@@ -160,6 +207,25 @@ mod tests {
         assert_eq!(moment(1300, &T, false, 3, 5), Some("sleep"));
         assert_eq!(moment(250, &T, false, 3, 5), Some("waking"));
         assert_eq!(moment(1050, &T, true, 3, 9), Some("iftar"));
+    }
+
+    #[test]
+    fn decks_continue_after_a_restart() {
+        let path = std::env::temp_dir().join(format!("miqaat-decks-test-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let kinds: Vec<String> = vec!["quran".into()];
+        let mut first = Picker::saved(path.clone());
+        let a: Vec<String> = (0..3).map(|_| first.pick(None, &kinds, false).unwrap().1.reference).collect();
+        // "restart": a new picker reading the same file carries on with the next verses
+        let mut second = Picker::saved(path.clone());
+        let b: Vec<String> = (0..3).map(|_| second.pick(None, &kinds, false).unwrap().1.reference).collect();
+        assert!(a.iter().all(|r| !b.contains(r)), "{a:?} repeated in {b:?}");
+        // a full round shows every verse once before any repeats
+        let mut fresh = Picker::new();
+        let n = fresh.items.iter().filter(|i| i.kind == "quran").count();
+        let round: std::collections::HashSet<String> = (0..n).map(|_| fresh.pick(None, &kinds, false).unwrap().1.reference).collect();
+        assert_eq!(round.len(), n);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

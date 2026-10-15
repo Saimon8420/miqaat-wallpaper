@@ -84,7 +84,7 @@ impl App {
             near_retry: 0,
             fetching: false,
             failed: false,
-            picker: Picker::new(),
+            picker: Picker::saved(crate::settings::data_dir().join("decks.json")),
             reminder: None,
             reminder_at: 0,
             last_moment: None,
