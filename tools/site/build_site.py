@@ -51,13 +51,13 @@ ed('<div class="me">Rust (chosen)<span>~25 MB</span>', '<div class="me">Rust (th
 ed("No text will be typed from memory. The Quran comes from the Tanzil verified Uthmani text; hadith only from collections with their grading shown; adhkar from Hisn al-Muslim with references. Days whose special worship is disputed are not presented as worship days. Each dataset's licence is checked before use.",
    "No text was typed from memory: every word is pulled from published datasets by a build script, and only the references were chosen by hand. Hadith come only from collections with their grading shown; adhkar from Hisn al-Muslim with item numbers. Days whose special worship is disputed are not presented as worship days.")
 ed("<li><b>Quran:</b> the same source as your al-kitab app: the <i>holy-quran</i> library (MIT), Hafs text with English (Sahih International) and Bangla translations, all 6,236 verses</li>",
-   "<li><b>Quran:</b> the <i>holy-quran</i> library (MIT): Hafs text with English (Sahih International) and Bangla translations; 165 short, complete verses chosen for a wallpaper</li>")
+   "<li><b>Quran:</b> the <i>holy-quran</i> library (MIT): Hafs text with English (Sahih International) and Bangla translations; 237 short, complete verses chosen for a wallpaper</li>")
 ed("<li><b>Hadith:</b> the free <i>hadith-api</i> (public domain): Bukhari, Muslim, Abu Dawud, Tirmidhi, Nasa'i, Ibn Majah and Malik in Arabic, English and Bangla, with gradings. Every hadith we show is cross-checked against sunnah.com</li>",
-   "<li><b>Hadith:</b> the free <i>hadith-api</i> (public domain) in Arabic, English and Bangla: 138 hadith from Bukhari, Muslim, Tirmidhi and an-Nawawi's Forty, each with its grading</li>")
+   "<li><b>Hadith:</b> the free <i>hadith-api</i> (public domain) in Arabic, English and Bangla: 224 hadith from Bukhari, Muslim, Tirmidhi, Abu Dawud, Ibn Majah and an-Nawawi's Forty, each with its grading</li>")
 ed("<li><b>Duas, dhikr, istighfar, durood and what to do on each day:</b> our own library, written from the Quran and hadith with a reference on every item, and checked by you before release</li>",
-   "<li><b>Duas, dhikr, istighfar and durood:</b> 125 items from Hisn al-Muslim (Fortress of the Muslim), with the book's item number on each</li>")
+   "<li><b>Duas, dhikr, istighfar and durood:</b> 220 items from Hisn al-Muslim (Fortress of the Muslim), with the book's item number on each</li>")
 ed("<li>All of it is packed into one small offline file (about 3–5 MB), so nothing needs the internet</li>",
-   "<li>All of it is one 650 KB file built into the app, so reminders never need the internet</li>")
+   "<li>All of it is one 1 MB file built into the app, so reminders never need the internet</li>")
 
 # Plan + decisions -> install section
 start = s.index('  <section>\n    <span class="eyebrow">Plan</span>')

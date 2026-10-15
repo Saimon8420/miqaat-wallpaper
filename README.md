@@ -61,11 +61,11 @@ No text was typed from memory. A build script pulls every word from published da
 
 | | Source | Count |
 |---|---|---|
-| Quran | [holy-quran](https://www.npmjs.com/package/holy-quran) (MIT): Hafs text, Sahih International English, Bangla | 165 short, complete verses |
-| Hadith | [hadith-api](https://github.com/fawazahmed0/hadith-api) (public domain), with gradings | 138 from Bukhari, Muslim, Tirmidhi and all of an-Nawawi's Forty |
-| Adhkar | *Hisn al-Muslim* via [hisnmuslim.com](https://www.hisnmuslim.com), with item numbers | 125 duas, dhikr, istighfar and durood, all with Bangla |
+| Quran | [holy-quran](https://www.npmjs.com/package/holy-quran) (MIT): Hafs text, Sahih International English, Bangla | 237 short, complete verses |
+| Hadith | [hadith-api](https://github.com/fawazahmed0/hadith-api) (public domain), with gradings | 224 from Bukhari, Muslim, Tirmidhi, Abu Dawud, Ibn Majah and all of an-Nawawi's Forty |
+| Adhkar | *Hisn al-Muslim* via [hisnmuslim.com](https://www.hisnmuslim.com), with item numbers | 220 duas, dhikr, istighfar and durood, all with Bangla |
 
-The library is a 650 KB file built into the app, so reminders never need the internet. Prayer times are fetched once a month and saved. If you're offline, the saved month keeps working.
+The library is a 1 MB file built into the app, so reminders never need the internet. Prayer times are fetched once a month and saved. If you're offline, the saved month keeps working.
 
 Days whose special worship is disputed are deliberately left out.
 
