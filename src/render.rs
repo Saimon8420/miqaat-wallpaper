@@ -258,6 +258,21 @@ impl Renderer {
         }
     }
 
+    /// Text on one line that never wraps: the font shrinks (down to half) until it fits `width`.
+    #[allow(clippy::too_many_arguments)]
+    fn one_line(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, width: f32, align: u8, color: D2D1_COLOR_F) -> Result<Piece> {
+        let mut s = size;
+        loop {
+            let f = self.format(which, s, weight, false)?;
+            unsafe { f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)? };
+            let p = self.piece(text, &f, width, align, 0.0, color)?;
+            if self.width(&p)? <= width || s <= size * 0.5 {
+                return Ok(p);
+            }
+            s *= 0.95;
+        }
+    }
+
     /// How wide the laid-out text actually is.
     fn width(&self, p: &Piece) -> Result<f32> {
         let mut m = DWRITE_TEXT_METRICS::default();
@@ -392,7 +407,7 @@ impl Renderer {
         let has_next = st.show_next && !f.next.is_empty();
         let mut tops = vec![
             (self.piece(&f.meta.to_uppercase(), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track, faint)?, 0.2 * u),
-            (self.piece(&clock_text, &self.format(clock_font, clock_size, clock_weight, false)?, clock_w, align, 0.0, white)?, -0.4 * u),
+            (self.one_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white)?, -0.4 * u),
         ];
         if has_next {
             let size = if corner || bar { 1.15 * u } else { 1.35 * u };

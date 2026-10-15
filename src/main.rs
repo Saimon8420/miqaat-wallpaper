@@ -370,20 +370,33 @@ unsafe extern "system" fn wall_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
             BeginPaint(hwnd, &mut ps);
-            with_app(|a| {
+            let moved = with_app(|a| {
                 a.ensure_renderer();
                 let f = a.frame();
                 let st = a.style();
                 match &a.renderer {
                     Some(r) => {
+                        let before = (r.clock_rect.borrow().clone(), r.strip_rect.borrow().clone());
                         if let Err(e) = r.paint(ps.hdc, ps.rcPaint, &a.monitors, &a.work, &a.panel_monitors(), &f, &st) {
                             log(&format!("paint: {e}"));
                         }
+                        let after = (r.clock_rect.borrow().clone(), r.strip_rect.borrow().clone());
+                        let whole = a.panel_rects().iter().all(|p| ps.rcPaint.left <= p.left && ps.rcPaint.top <= p.top && ps.rcPaint.right >= p.right && ps.rcPaint.bottom >= p.bottom);
+                        (before != after && !before.0.is_empty() && !whole).then(|| a.panel_rects())
                     }
-                    None => log("no renderer"),
+                    None => {
+                        log("no renderer");
+                        None
+                    }
                 }
-            });
+            })
+            .flatten();
             let _ = EndPaint(hwnd, &ps);
+            if let Some(rs) = moved {
+                for r in rs {
+                    let _ = InvalidateRect(Some(hwnd), Some(&r), false);
+                }
+            }
             LRESULT(0)
         }
         WM_ERASEBKGND => LRESULT(1),
