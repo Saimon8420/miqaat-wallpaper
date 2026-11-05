@@ -235,7 +235,7 @@ fn ensure_events() {
     let job = with_app(|a| {
         let (days, _) = a.now();
         let fresh = a.events.map(|(d, _)| d == days).unwrap_or(false);
-        if !a.s.show_event || fresh || a.events_fetching || times::utc_seconds() - a.events_try < 1800 {
+        if !a.s.show_event || fresh || a.events_fetching || times::utc_seconds() - a.events_try < 300 {
             return None;
         }
         a.events_fetching = true;
@@ -667,8 +667,9 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             let got = *Box::from_raw(lp.0 as *mut Option<(i64, [i64; 3])>);
             with_app(|a| {
                 a.events_fetching = false;
-                if got.is_some() {
-                    a.events = got;
+                if let Some(e) = got {
+                    a.events = Some(e);
+                    let _ = std::fs::write(settings::data_dir().join("events.json"), serde_json::to_string(&e).unwrap_or_default());
                 }
             });
             if got.is_some() {

@@ -110,7 +110,8 @@ impl App {
             notified: vec![],
             user_wallpaper: String::new(),
             fake_now: None,
-            events: None,
+            // last known answer, so the line shows at once after a restart or with no network
+            events: std::fs::read_to_string(crate::settings::data_dir().join("events.json")).ok().and_then(|t| serde_json::from_str(&t).ok()),
             events_fetching: false,
             update: None,
             events_try: 0,
@@ -389,7 +390,7 @@ impl App {
         }
 
         let fasting = if self.s.show_fasting { self.fasting_line(days, now) } else { None };
-        let event = if self.s.show_event { self.events.and_then(|(d, e)| (d == days).then_some(e)).and_then(|e| crate::extras::event(l, e)) } else { None };
+        let event = if self.s.show_event { self.events.and_then(|(d, e)| (d <= days && days - d < 30).then(|| e.map(|x| x - (days - d)))).and_then(|e| crate::extras::event(l, e)) } else { None };
         let qibla = self.s.show_qibla.then(|| {
             let deg = crate::extras::qibla(self.s.lat, self.s.lng);
             (deg as f32, crate::extras::qibla_text(l, deg))
