@@ -1,0 +1,577 @@
+[
+ {
+  "id": "illuminated-page",
+  "name": "Illuminated page",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "لا إله إلا الله",
+   "محمد رسول الله"
+  ],
+  "en": "There is no god but Allah, Muhammad is the Messenger of Allah",
+  "ref": "The testimony of faith",
+  "font": "RK",
+  "ink": "#3a2a12",
+  "panel": "#2a1f10",
+  "accent": "#8a5f1c",
+  "scale": 1,
+  "box": [
+   190,
+   190,
+   802,
+   710
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.22
+ },
+ {
+  "id": "night-over-the-mosque",
+  "name": "Night over the mosque",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "ألا بذكر الله",
+   "تطمئن القلوب"
+  ],
+  "en": "Verily, in the remembrance of Allah do hearts find rest",
+  "ref": "Ar-Ra'd 13:28",
+  "font": "NK",
+  "ink": "#f4e3b0",
+  "panel": "#f6f2ea",
+  "accent": "#e9c46a",
+  "scale": 1,
+  "box": [
+   160,
+   110,
+   832,
+   470
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "dunes-at-dawn",
+  "name": "Dunes at dawn",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "إن مع العسر",
+   "يسرا"
+  ],
+  "en": "Indeed, with hardship comes ease",
+  "ref": "Ash-Sharh 94:6",
+  "font": "CH",
+  "ink": "#4a1f0c",
+  "panel": "#3a1a0e",
+  "accent": "#8b3a1c",
+  "scale": 1.15,
+  "box": [
+   150,
+   140,
+   840,
+   560
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "lanterns",
+  "name": "Lanterns",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "توكلت على الله"
+  ],
+  "en": "I put my trust in Allah",
+  "ref": "Hud 11:56",
+  "font": "EM",
+  "ink": "#f6e2ae",
+  "panel": "#f6f2ea",
+  "accent": "#f0c26a",
+  "scale": 1.1,
+  "box": [
+   150,
+   430,
+   842,
+   760
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "tone-on-tone-allah",
+  "name": "Tone-on-tone Allah",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "أستغفر الله"
+  ],
+  "en": "I seek the forgiveness of Allah",
+  "ref": "Sahih Muslim 2702",
+  "font": "AX",
+  "ink": "#24392a",
+  "panel": "#1c2a1f",
+  "accent": "#5d6d2a",
+  "scale": 1.25,
+  "box": [
+   150,
+   300,
+   842,
+   620
+  ],
+  "no_meaning": false,
+  "watermark": {
+   "t": "الله",
+   "x": 496,
+   "y": 640,
+   "size": 620,
+   "c": "#c7d1b6",
+   "f": "RK"
+  },
+  "grain": 0.0
+ },
+ {
+  "id": "hexagon-tessellation",
+  "name": "Hexagon tessellation",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "لا حول ولا قوة",
+   "إلا بالله"
+  ],
+  "en": "There is no might nor power except with Allah",
+  "ref": "Sahih al-Bukhari 6384",
+  "font": "KF",
+  "ink": "#3b2a12",
+  "panel": "#2a1f10",
+  "accent": "#8a5f1c",
+  "scale": 1,
+  "box": [
+   150,
+   180,
+   842,
+   720
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "ink-seal",
+  "name": "Ink & seal",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "فاذكروني",
+   "أذكركم"
+  ],
+  "en": "So remember Me; I will remember you",
+  "ref": "Al-Baqarah 2:152",
+  "font": "LZ",
+  "ink": "#1a1714",
+  "panel": "#1a1714",
+  "accent": "#a8322a",
+  "scale": 1.15,
+  "box": [
+   150,
+   160,
+   842,
+   680
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.25
+ },
+ {
+  "id": "zellige-corner",
+  "name": "Zellige corner",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "ما شاء الله",
+   "لا قوة إلا بالله"
+  ],
+  "en": "What Allah wills; there is no power except with Allah",
+  "ref": "Al-Kahf 18:39",
+  "font": "NK",
+  "ink": "#5a2614",
+  "panel": "#3a1a0e",
+  "accent": "#1f6f5c",
+  "scale": 1,
+  "box": [
+   180,
+   220,
+   842,
+   700
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "oasis-at-sunset",
+  "name": "Oasis at sunset",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "الله لطيف",
+   "بعباده"
+  ],
+  "en": "Allah is Subtle with His servants",
+  "ref": "Ash-Shura 42:19",
+  "font": "EM",
+  "ink": "#3b1d0e",
+  "panel": "#2a160c",
+  "accent": "#9a4a1c",
+  "scale": 1.1,
+  "box": [
+   300,
+   90,
+   820,
+   440
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "moonlit-sea",
+  "name": "Moonlit sea",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "وهو معكم",
+   "أينما كنتم"
+  ],
+  "en": "And He is with you wherever you are",
+  "ref": "Al-Hadid 57:4",
+  "font": "NK",
+  "ink": "#eef2f6",
+  "panel": "#f2f6f8",
+  "accent": "#bfe0f2",
+  "scale": 1,
+  "box": [
+   150,
+   140,
+   842,
+   520
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "papercut-mosque",
+  "name": "Papercut mosque",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "والله يحب",
+   "المحسنين"
+  ],
+  "en": "And Allah loves the doers of good",
+  "ref": "Al 'Imran 3:134",
+  "font": "RK",
+  "ink": "#24392a",
+  "panel": "#1c2a1f",
+  "accent": "#5d6d2a",
+  "scale": 1,
+  "box": [
+   150,
+   110,
+   842,
+   500
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "terracotta-niche",
+  "name": "Terracotta niche",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "لا تحزن",
+   "إن الله معنا"
+  ],
+  "en": "Do not grieve; indeed, Allah is with us",
+  "ref": "At-Tawbah 9:40",
+  "font": "CH",
+  "ink": "#fbeee0",
+  "panel": "#2e160c",
+  "accent": "#7a2e14",
+  "scale": 1,
+  "box": [
+   290,
+   300,
+   700,
+   700
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.28
+ },
+ {
+  "id": "book-candle",
+  "name": "Book & candle",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "ورتل القرآن",
+   "ترتيلا"
+  ],
+  "en": "And recite the Qur'an with measured recitation",
+  "ref": "Al-Muzzammil 73:4",
+  "font": "RK",
+  "ink": "#f6dfa6",
+  "panel": "#f6f2ea",
+  "accent": "#f0c26a",
+  "scale": 1,
+  "box": [
+   150,
+   120,
+   842,
+   560
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "ramadan-night",
+  "name": "Ramadan night",
+  "occasion": true,
+  "tag": "Ramadan",
+  "ar": [
+   "رمضان كريم"
+  ],
+  "en": "A generous Ramadan to you",
+  "ref": "Ramadan greeting",
+  "font": "RK",
+  "ink": "#f7e2a6",
+  "panel": "#f6f2ea",
+  "accent": "#f0c26a",
+  "scale": 1.45,
+  "box": [
+   380,
+   200,
+   880,
+   560
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "month-of-the-qur-an",
+  "name": "Month of the Qur'an",
+  "occasion": true,
+  "tag": "Ramadan",
+  "ar": [
+   "شهر رمضان",
+   "الذي أنزل فيه القرآن"
+  ],
+  "en": "The month of Ramadan, in which the Qur'an was revealed",
+  "ref": "Al-Baqarah 2:185",
+  "font": "RK",
+  "ink": "#f6dfa6",
+  "panel": "#f6f2ea",
+  "accent": "#f0c26a",
+  "scale": 0.9,
+  "box": [
+   150,
+   600,
+   850,
+   860
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "lantern-street",
+  "name": "Lantern street",
+  "occasion": true,
+  "tag": "Ramadan",
+  "ar": [
+   "رمضان مبارك"
+  ],
+  "en": "Blessed Ramadan",
+  "ref": "Ramadan greeting",
+  "font": "RK",
+  "ink": "#3a1a0c",
+  "panel": "#2a140a",
+  "accent": "#a8401c",
+  "scale": 1.35,
+  "box": [
+   180,
+   300,
+   842,
+   560
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "laylat-al-qadr",
+  "name": "Laylat al-Qadr",
+  "occasion": true,
+  "tag": "Last ten nights",
+  "ar": [
+   "ليلة القدر",
+   "خير من ألف شهر"
+  ],
+  "en": "The Night of Decree is better than a thousand months",
+  "ref": "Al-Qadr 97:3",
+  "font": "RK",
+  "ink": "#fbf1d0",
+  "panel": "#f6f2ea",
+  "accent": "#f3d58e",
+  "scale": 1,
+  "box": [
+   150,
+   90,
+   842,
+   430
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "eid-morning",
+  "name": "Eid morning",
+  "occasion": true,
+  "tag": "Eid al-Fitr",
+  "ar": [
+   "عيد مبارك"
+  ],
+  "en": "Blessed Eid",
+  "ref": "Eid al-Fitr greeting",
+  "font": "RK",
+  "ink": "#5a2416",
+  "panel": "#3a1a10",
+  "accent": "#a8401c",
+  "scale": 1.4,
+  "box": [
+   260,
+   300,
+   740,
+   450
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.2
+ },
+ {
+  "id": "eid-card",
+  "name": "Eid card",
+  "occasion": true,
+  "tag": "Eid al-Fitr",
+  "ar": [
+   "تقبل الله",
+   "منا ومنكم"
+  ],
+  "en": "May Allah accept from us and from you",
+  "ref": "Eid greeting of the Companions",
+  "font": "RK",
+  "ink": "#f4dc9a",
+  "panel": "#1d2a22",
+  "accent": "#8a6420",
+  "scale": 1.05,
+  "box": [
+   318,
+   400,
+   682,
+   680
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.18
+ },
+ {
+  "id": "day-of-arafah",
+  "name": "Day of Arafah",
+  "occasion": true,
+  "tag": "Eid al-Adha",
+  "ar": [
+   "لبيك اللهم",
+   "لبيك"
+  ],
+  "en": "Here I am, O Allah, here I am",
+  "ref": "The Talbiyah of Hajj",
+  "font": "RK",
+  "ink": "#fff1dc",
+  "panel": "#f6f2ea",
+  "accent": "#ffd29a",
+  "scale": 1.2,
+  "box": [
+   150,
+   80,
+   842,
+   370
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "eid-prayer-at-the-eidgah",
+  "name": "Eid prayer at the eidgah",
+  "occasion": true,
+  "tag": "Eid al-Adha",
+  "ar": [
+   "عيد أضحى",
+   "مبارك"
+  ],
+  "en": "Blessed Eid al-Adha",
+  "ref": "Eid al-Adha greeting",
+  "font": "RK",
+  "ink": "#24392a",
+  "panel": "#1c2a1f",
+  "accent": "#7a5a1c",
+  "scale": 1.2,
+  "box": [
+   150,
+   60,
+   842,
+   300
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "takbir-of-eid",
+  "name": "Takbir of Eid",
+  "occasion": true,
+  "tag": "Eid al-Fitr & al-Adha",
+  "ar": [
+   "الله أكبر الله أكبر",
+   "لا إله إلا الله",
+   "الله أكبر ولله الحمد"
+  ],
+  "en": "Allah is the Greatest, there is no god but Allah, and to Allah belongs all praise",
+  "ref": "Takbir of the Eid days",
+  "font": "RK",
+  "ink": "#f6e3a8",
+  "panel": "#f6f2ea",
+  "accent": "#e2c27a",
+  "scale": 0.8,
+  "box": [
+   150,
+   120,
+   842,
+   400
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ }
+]

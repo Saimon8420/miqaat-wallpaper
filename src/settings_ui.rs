@@ -64,6 +64,8 @@ enum Ctl {
     DateParts,
     City,
     Pictures,
+    /// The calligraphy scenes, as tiles.
+    Calligraphy,
     Accent,
     /// Which screens show the clock panel (only when several are connected).
     Screens,
@@ -111,6 +113,8 @@ fn rows() -> Vec<Row> {
         r(1, "Smart timing", "Follow the time of day", "Morning and evening adhkar, adhkar after salah, before sleep", "follow_time", Ctl::Switch),
         r(1, "Smart timing", "Special days", "White Days, Monday/Thursday fasts, Ashura, Arafah, Ramadan…", "special_days", Ctl::Switch),
         r(2, "", "Picture", "One of 20 places, or your own photo", "scene", Ctl::Pictures),
+        r(2, "", "Calligraphy", "Or one of 13 calligraphy scenes, drawn by the app", "scene", Ctl::Calligraphy),
+        r(2, "", "Ramadan & Eid scenes", "By themselves in Ramadan, on Eid al-Fitr, Arafah and Eid al-Adha", "occasions", Ctl::Switch),
         r(2, "Light", "Light follows the sky", "Rose at Fajr, gold at sunrise, warm at Asr, orange at Maghrib, blue at Isha", "light_follows", Ctl::Switch),
         r(2, "Light", "Night darkness", "How dark the picture gets after Isha", "night_dark", Ctl::Slider(0, 100, "%")),
         r(2, "Light", "Panel shade", "How dark the area behind the text is", "shade", Ctl::Slider(0, 100, "%")),
@@ -402,6 +406,7 @@ enum Act {
     Slider(usize),
     Chip(usize, usize),
     Thumb(usize),
+    Cal(usize),
     Dot(usize),
     Custom,
     Search,
@@ -445,6 +450,7 @@ struct Ui {
     disp_font: HSTRING,
     fonts: RefCell<HashMap<String, (IDWriteFontCollection1, HSTRING)>>,
     thumbs: Vec<IWICBitmap>,
+    cal_thumbs: Vec<IWICBitmap>,
     custom_thumb: RefCell<Option<(String, Option<IWICBitmap>)>>,
     rows: Vec<Row>,
     section: usize,
@@ -775,6 +781,11 @@ impl Ui {
                 let n = (crate::assets::SCENES.len() + 1).div_ceil(5) as f32;
                 66.0 + n * (th + 8.0) - 8.0 + 16.0
             }
+            Ctl::Calligraphy => {
+                let (_, th) = self.tile_size();
+                let n = crate::calligraphy::everyday().len().div_ceil(5) as f32;
+                66.0 + n * (th + 8.0) - 8.0 + 16.0
+            }
             Ctl::Font(_) => 80.0,
             Ctl::About => 172.0,
             Ctl::Screens => 66.0 + 112.0,
@@ -854,6 +865,10 @@ impl Ui {
                 self.seg(t, th, i, &ROTATE, &s.rotate, right, cy)?;
                 self.pictures(t, th, s, y + 66.0)?;
                 right - 330.0
+            }
+            Ctl::Calligraphy => {
+                self.calligraphy(t, th, s, y + 66.0)?;
+                right
             }
             Ctl::Accent => self.accent_dots(t, th, s, right, cy)?,
             Ctl::Screens => {
@@ -1017,6 +1032,40 @@ impl Ui {
             self.want_city.set(Some(rc(f.left + 10.0, cy - 10.0 + dy, f.right - 8.0, cy + 10.0 + dy)));
         }
         Ok(f.left)
+    }
+
+    fn calligraphy(&self, t: &ID2D1RenderTarget, th: &Theme, s: &Settings, y: f32) -> Result<()> {
+        let (tw, thh) = self.tile_size();
+        let x0 = MX + 16.0;
+        for (k, &i) in crate::calligraphy::everyday().iter().enumerate() {
+            let (col, rowi) = ((k % 5) as f32, (k / 5) as f32);
+            let x = x0 + col * (tw + 8.0);
+            let yy = y + rowi * (thh + 8.0);
+            let r = rc(x, yy, x + tw, yy + thh);
+            unsafe {
+                match self.cal_thumbs.get(k) {
+                    Some(b) => {
+                        let d = t.CreateBitmapFromWicBitmap(b, None)?;
+                        let br = t.CreateBitmapBrush(&d, None, None)?;
+                        br.SetTransform(&(Matrix3x2::scale(tw / 192.0, thh / 108.0) * Matrix3x2::translation(x, yy)));
+                        t.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: 6.0, radiusY: 6.0 }, &br);
+                    }
+                    None => rr(t, r, 6.0, Some(th.ctl), Some(th.ctlb))?,
+                }
+            }
+            let c = &crate::assets::CALLIGRAPHY[i];
+            let lab = rc(x + 7.0, yy + thh - 20.0, x + tw - 4.0, yy + thh - 3.0);
+            self.text(t, c.name, &Fam::Ui, rc(lab.left + 1.0, lab.top + 1.0, lab.right + 1.0, lab.bottom + 1.0), 11.0, 600, alpha(hexc(0), 0.75), 0)?;
+            self.text(t, c.name, &Fam::Ui, lab, 11.0, 600, hexc(0xffffff), 0)?;
+            if s.scene.strip_prefix("cal:") == Some(c.id) {
+                rr(t, rc(r.left - 2.0, r.top - 2.0, r.right + 2.0, r.bottom + 2.0), 8.0, None, Some(th.acc))?;
+                rr(t, rc(r.left - 1.0, r.top - 1.0, r.right + 1.0, r.bottom + 1.0), 7.0, None, Some(th.acc))?;
+            } else if self.hovered(Act::Cal(k)) {
+                rr(t, rc(r.left - 1.0, r.top - 1.0, r.right + 1.0, r.bottom + 1.0), 7.0, None, Some(alpha(th.ink, 0.5)))?;
+            }
+            self.hit(r, Act::Cal(k));
+        }
+        Ok(())
     }
 
     fn pictures(&self, t: &ID2D1RenderTarget, th: &Theme, s: &Settings, y: f32) -> Result<()> {
@@ -1763,6 +1812,14 @@ fn act(a: Act, r: R, x: f32, y: f32) {
             }
             apply(n);
         }
+        Act::Cal(k) => {
+            if let Some(&i) = crate::calligraphy::everyday().get(k) {
+                let mut n = s.clone();
+                n.scene = format!("cal:{}", crate::assets::CALLIGRAPHY[i].id);
+                n.rotate = "keep".into();
+                apply(n);
+            }
+        }
         Act::Thumb(k) => {
             let scenes = crate::assets::SCENES;
             if k < scenes.len() {
@@ -1914,6 +1971,7 @@ unsafe fn create(hwnd: HWND) -> Result<Ui> {
         disp_font,
         fonts: RefCell::new(HashMap::new()),
         thumbs: vec![],
+        cal_thumbs: vec![],
         custom_thumb: RefCell::new(None),
         rows: rows(),
         section,
@@ -1995,9 +2053,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 .iter()
                 .filter_map(|s| crate::render::load_photo(&crate::render::Photo::Embedded(s.jpg), 192, 108, "none", false, false, 0).ok().map(|x| x.0))
                 .collect();
+            // the calligraphy scenes are drawn small, the same way the wallpaper draws them
+            let en = crate::settings::Settings::load().font_en;
+            let cal_thumbs: Vec<IWICBitmap> = crate::calligraphy::everyday()
+                .into_iter()
+                .filter_map(|i| crate::render::load_photo(&crate::render::Photo::Calligraphy(i, false, en.clone()), 192, 108, "none", false, false, 0).ok().map(|x| x.0))
+                .collect();
             UI.with(|u| {
                 if let Some(u) = u.borrow_mut().as_mut() {
                     u.thumbs = thumbs;
+                    u.cal_thumbs = cal_thumbs;
                 }
             });
             redraw();

@@ -14,6 +14,7 @@ mod app;
 mod assets;
 mod content;
 mod desktop;
+mod calligraphy;
 mod extras;
 mod hijri;
 mod i18n;
@@ -610,9 +611,15 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 WM_LBUTTONDBLCLK => settings_ui::open(),
                 WM_RBUTTONUP | WM_CONTEXTMENU => {
                     let (paused, credit, source) = with_app(|a| {
-                        let s = &assets::SCENES[a.scene_key.get(a.primary).copied().unwrap_or(0)];
                         let custom = a.s.scene == "custom";
-                        (a.paused, if custom { "your own photo".to_string() } else { format!("{} · {}", s.name, s.credit) }, if custom { String::new() } else { s.source.to_string() })
+                        match a.scene_key.get(a.primary).copied().unwrap_or(app::Pic::Photo(0)) {
+                            app::Pic::Cal(i) => (a.paused, format!("Calligraphy · {}", assets::CALLIGRAPHY[i].name), String::new()),
+                            app::Pic::Photo(_) if custom => (a.paused, "your own photo".to_string(), String::new()),
+                            app::Pic::Photo(i) => {
+                                let s = &assets::SCENES[i];
+                                (a.paused, format!("{} · {}", s.name, s.credit), s.source.to_string())
+                            }
+                        }
                     })
                     .unwrap_or((false, String::new(), String::new()));
                     let update = with_app(|a| a.update.as_ref().map(|u| u.0.clone())).flatten();
@@ -626,7 +633,12 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         tray::CMD_SETTINGS => settings_ui::open(),
                         tray::CMD_NEXT_SCENE => {
                             with_app(|a| {
-                                if a.s.scene == "custom" || a.s.rotate == "keep" {
+                                if let (Some(id), "keep") = (a.s.scene.strip_prefix("cal:"), a.s.rotate.as_str()) {
+                                    let list = calligraphy::everyday();
+                                    let k = calligraphy::index(id).and_then(|i| list.iter().position(|&x| x == i)).map(|k| (k + 1) % list.len()).unwrap_or(0);
+                                    a.s.scene = format!("cal:{}", assets::CALLIGRAPHY[list[k]].id);
+                                    a.s.save();
+                                } else if a.s.scene == "custom" || a.s.rotate == "keep" {
                                     let n = assets::SCENES.len();
                                     let i = assets::SCENES.iter().position(|x| x.id == a.s.scene).map(|i| (i + 1) % n).unwrap_or(0);
                                     a.s.scene = assets::SCENES[i].id.into();

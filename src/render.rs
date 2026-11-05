@@ -26,6 +26,8 @@ use crate::sysmon::Sample;
 pub enum Photo {
     Embedded(&'static [u8]),
     File(String),
+    /// A calligraphy scene: its index, whether to mirror it, and the English font for the meaning.
+    Calligraphy(usize, bool, String),
 }
 
 /// Everything the text panel shows, already in the chosen language.
@@ -1084,27 +1086,33 @@ impl Drop for Renderer {
 pub(crate) fn load_photo(src: &Photo, w: u32, h: u32, effect: &str, grain: bool, glass: bool, glass_blur: u32) -> Result<(IWICBitmap, Option<IWICBitmap>)> {
     unsafe {
         let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-        let dec = match src {
-            Photo::Embedded(bytes) => {
-                let stream = wic.CreateStream()?;
-                stream.InitializeFromMemory(bytes)?;
-                wic.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?
+        let mut photo = match src {
+            Photo::Calligraphy(i, flip, en) => crate::calligraphy::render(*i, w, h, *flip, en)?,
+            _ => {
+                let dec = match src {
+                    Photo::Embedded(bytes) => {
+                        let stream = wic.CreateStream()?;
+                        stream.InitializeFromMemory(bytes)?;
+                        wic.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?
+                    }
+                    Photo::File(path) => wic.CreateDecoderFromFilename(&HSTRING::from(path.as_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?,
+                    Photo::Calligraphy(..) => unreachable!(),
+                };
+                let frame = dec.GetFrame(0)?;
+                let (mut iw, mut ih) = (0u32, 0u32);
+                frame.GetSize(&mut iw, &mut ih)?;
+                let s = (w as f64 / iw as f64).max(h as f64 / ih as f64);
+                let (sw, sh) = ((((iw as f64) * s).ceil() as u32).max(w), (((ih as f64) * s).ceil() as u32).max(h));
+                let scaler = wic.CreateBitmapScaler()?;
+                scaler.Initialize(&frame, sw, sh, WICBitmapInterpolationModeHighQualityCubic)?;
+                let clip = wic.CreateBitmapClipper()?;
+                let r = WICRect { X: ((sw - w) / 2) as i32, Y: ((sh - h) / 2) as i32, Width: w as i32, Height: h as i32 };
+                clip.Initialize(&scaler, &r)?;
+                let conv = wic.CreateFormatConverter()?;
+                conv.Initialize(&clip, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeMedianCut)?;
+                wic.CreateBitmapFromSource(&conv, WICBitmapCacheOnLoad)?
             }
-            Photo::File(path) => wic.CreateDecoderFromFilename(&HSTRING::from(path.as_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?,
         };
-        let frame = dec.GetFrame(0)?;
-        let (mut iw, mut ih) = (0u32, 0u32);
-        frame.GetSize(&mut iw, &mut ih)?;
-        let s = (w as f64 / iw as f64).max(h as f64 / ih as f64);
-        let (sw, sh) = ((((iw as f64) * s).ceil() as u32).max(w), (((ih as f64) * s).ceil() as u32).max(h));
-        let scaler = wic.CreateBitmapScaler()?;
-        scaler.Initialize(&frame, sw, sh, WICBitmapInterpolationModeHighQualityCubic)?;
-        let clip = wic.CreateBitmapClipper()?;
-        let r = WICRect { X: ((sw - w) / 2) as i32, Y: ((sh - h) / 2) as i32, Width: w as i32, Height: h as i32 };
-        clip.Initialize(&scaler, &r)?;
-        let conv = wic.CreateFormatConverter()?;
-        conv.Initialize(&clip, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeMedianCut)?;
-        let mut photo = wic.CreateBitmapFromSource(&conv, WICBitmapCacheOnLoad)?;
 
         // Blur by shrinking and growing back: cheap, and smooth with a good scaler.
         let blur = |src: &IWICBitmap, div: u32, back_w: u32, back_h: u32| -> Result<IWICBitmap> {

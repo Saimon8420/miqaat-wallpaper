@@ -15,6 +15,8 @@ ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 windows-numerics = "0.2"
+# Draws the calligraphy scenes (SVG). No text, fonts or image formats: only shapes.
+resvg = { version = "0.49", default-features = false }
 
 [dependencies.windows]
 version = "0.61"

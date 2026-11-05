@@ -127,5 +127,62 @@ pub static ENGLISH_FONTS: &[Font] = &[
     font!("JetBrains Mono", "jetbrains-mono-200.ttf", "jetbrains-mono-300.ttf", "jetbrains-mono-400.ttf", "jetbrains-mono-600.ttf"),
 ];
 
+pub struct Watermark {
+    pub text: &'static str,
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub color: &'static str,
+    pub font: &'static str,
+}
+
+/// A calligraphy scene. Coordinates are in a 1600×900 picture whose lettering column is the left 62%.
+pub struct Calligraphy {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// Shown by itself in Ramadan, on Eid and on Arafah, not picked by hand.
+    pub occasion: bool,
+    pub lines: &'static [&'static str],
+    pub meaning: &'static str,
+    pub reference: &'static str,
+    pub font: &'static str,
+    pub ink: &'static str,
+    /// Colour of the clock panel's text on this scene, and its accent.
+    pub panel: &'static str,
+    pub accent: &'static str,
+    pub scale: f32,
+    /// left, top, right, bottom of the lettering box
+    pub bx: [f32; 4],
+    pub no_meaning: bool,
+    pub watermark: Option<Watermark>,
+    pub grain: f32,
+    pub svg: &'static str,
+}
+
+pub static CALLIGRAPHY: &[Calligraphy] = &[
+    Calligraphy { id: "illuminated-page", name: "Illuminated page", occasion: false, lines: &["لا إله إلا الله", "محمد رسول الله"], meaning: "There is no god but Allah, Muhammad is the Messenger of Allah", reference: "The testimony of faith", font: "Reem Kufi", ink: "#3a2a12", panel: "#2a1f10", accent: "#8a5f1c", scale: 1.0_f32, bx: [190.0_f32, 190.0_f32, 802.0_f32, 710.0_f32], no_meaning: false, watermark: None, grain: 0.22_f32, svg: include_str!("../assets/calligraphy/illuminated-page.svg") },
+    Calligraphy { id: "night-over-the-mosque", name: "Night over the mosque", occasion: false, lines: &["ألا بذكر الله", "تطمئن القلوب"], meaning: "Verily, in the remembrance of Allah do hearts find rest", reference: "Ar-Ra'd 13:28", font: "Noto Kufi Arabic", ink: "#f4e3b0", panel: "#f6f2ea", accent: "#e9c46a", scale: 1.0_f32, bx: [160.0_f32, 110.0_f32, 832.0_f32, 470.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/night-over-the-mosque.svg") },
+    Calligraphy { id: "dunes-at-dawn", name: "Dunes at dawn", occasion: false, lines: &["إن مع العسر", "يسرا"], meaning: "Indeed, with hardship comes ease", reference: "Ash-Sharh 94:6", font: "Changa", ink: "#4a1f0c", panel: "#3a1a0e", accent: "#8b3a1c", scale: 1.15_f32, bx: [150.0_f32, 140.0_f32, 840.0_f32, 560.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/dunes-at-dawn.svg") },
+    Calligraphy { id: "lanterns", name: "Lanterns", occasion: false, lines: &["توكلت على الله"], meaning: "I put my trust in Allah", reference: "Hud 11:56", font: "El Messiri", ink: "#f6e2ae", panel: "#f6f2ea", accent: "#f0c26a", scale: 1.1_f32, bx: [150.0_f32, 430.0_f32, 842.0_f32, 760.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/lanterns.svg") },
+    Calligraphy { id: "tone-on-tone-allah", name: "Tone-on-tone Allah", occasion: false, lines: &["أستغفر الله"], meaning: "I seek the forgiveness of Allah", reference: "Sahih Muslim 2702", font: "Alexandria", ink: "#24392a", panel: "#1c2a1f", accent: "#5d6d2a", scale: 1.25_f32, bx: [150.0_f32, 300.0_f32, 842.0_f32, 620.0_f32], no_meaning: false, watermark: Some(Watermark { text: "الله", x: 496.0_f32, y: 640.0_f32, size: 620.0_f32, color: "#c7d1b6", font: "Reem Kufi" }), grain: 0.0_f32, svg: include_str!("../assets/calligraphy/tone-on-tone-allah.svg") },
+    Calligraphy { id: "hexagon-tessellation", name: "Hexagon tessellation", occasion: false, lines: &["لا حول ولا قوة", "إلا بالله"], meaning: "There is no might nor power except with Allah", reference: "Sahih al-Bukhari 6384", font: "Kufam", ink: "#3b2a12", panel: "#2a1f10", accent: "#8a5f1c", scale: 1.0_f32, bx: [150.0_f32, 180.0_f32, 842.0_f32, 720.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/hexagon-tessellation.svg") },
+    Calligraphy { id: "ink-seal", name: "Ink & seal", occasion: false, lines: &["فاذكروني", "أذكركم"], meaning: "So remember Me; I will remember you", reference: "Al-Baqarah 2:152", font: "Lalezar", ink: "#1a1714", panel: "#1a1714", accent: "#a8322a", scale: 1.15_f32, bx: [150.0_f32, 160.0_f32, 842.0_f32, 680.0_f32], no_meaning: false, watermark: None, grain: 0.25_f32, svg: include_str!("../assets/calligraphy/ink-seal.svg") },
+    Calligraphy { id: "zellige-corner", name: "Zellige corner", occasion: false, lines: &["ما شاء الله", "لا قوة إلا بالله"], meaning: "What Allah wills; there is no power except with Allah", reference: "Al-Kahf 18:39", font: "Noto Kufi Arabic", ink: "#5a2614", panel: "#3a1a0e", accent: "#1f6f5c", scale: 1.0_f32, bx: [180.0_f32, 220.0_f32, 842.0_f32, 700.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/zellige-corner.svg") },
+    Calligraphy { id: "oasis-at-sunset", name: "Oasis at sunset", occasion: false, lines: &["الله لطيف", "بعباده"], meaning: "Allah is Subtle with His servants", reference: "Ash-Shura 42:19", font: "El Messiri", ink: "#3b1d0e", panel: "#2a160c", accent: "#9a4a1c", scale: 1.1_f32, bx: [300.0_f32, 90.0_f32, 820.0_f32, 440.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/oasis-at-sunset.svg") },
+    Calligraphy { id: "moonlit-sea", name: "Moonlit sea", occasion: false, lines: &["وهو معكم", "أينما كنتم"], meaning: "And He is with you wherever you are", reference: "Al-Hadid 57:4", font: "Noto Kufi Arabic", ink: "#eef2f6", panel: "#f2f6f8", accent: "#bfe0f2", scale: 1.0_f32, bx: [150.0_f32, 140.0_f32, 842.0_f32, 520.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/moonlit-sea.svg") },
+    Calligraphy { id: "papercut-mosque", name: "Papercut mosque", occasion: false, lines: &["والله يحب", "المحسنين"], meaning: "And Allah loves the doers of good", reference: "Al 'Imran 3:134", font: "Reem Kufi", ink: "#24392a", panel: "#1c2a1f", accent: "#5d6d2a", scale: 1.0_f32, bx: [150.0_f32, 110.0_f32, 842.0_f32, 500.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/papercut-mosque.svg") },
+    Calligraphy { id: "terracotta-niche", name: "Terracotta niche", occasion: false, lines: &["لا تحزن", "إن الله معنا"], meaning: "Do not grieve; indeed, Allah is with us", reference: "At-Tawbah 9:40", font: "Changa", ink: "#fbeee0", panel: "#2e160c", accent: "#7a2e14", scale: 1.0_f32, bx: [290.0_f32, 300.0_f32, 700.0_f32, 700.0_f32], no_meaning: false, watermark: None, grain: 0.28_f32, svg: include_str!("../assets/calligraphy/terracotta-niche.svg") },
+    Calligraphy { id: "book-candle", name: "Book & candle", occasion: false, lines: &["ورتل القرآن", "ترتيلا"], meaning: "And recite the Qur'an with measured recitation", reference: "Al-Muzzammil 73:4", font: "Reem Kufi", ink: "#f6dfa6", panel: "#f6f2ea", accent: "#f0c26a", scale: 1.0_f32, bx: [150.0_f32, 120.0_f32, 842.0_f32, 560.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/book-candle.svg") },
+    Calligraphy { id: "ramadan-night", name: "Ramadan night", occasion: true, lines: &["رمضان كريم"], meaning: "A generous Ramadan to you", reference: "Ramadan greeting", font: "Reem Kufi", ink: "#f7e2a6", panel: "#f6f2ea", accent: "#f0c26a", scale: 1.45_f32, bx: [380.0_f32, 200.0_f32, 880.0_f32, 560.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/ramadan-night.svg") },
+    Calligraphy { id: "month-of-the-qur-an", name: "Month of the Qur'an", occasion: true, lines: &["شهر رمضان", "الذي أنزل فيه القرآن"], meaning: "The month of Ramadan, in which the Qur'an was revealed", reference: "Al-Baqarah 2:185", font: "Reem Kufi", ink: "#f6dfa6", panel: "#f6f2ea", accent: "#f0c26a", scale: 0.9_f32, bx: [150.0_f32, 600.0_f32, 850.0_f32, 860.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/month-of-the-qur-an.svg") },
+    Calligraphy { id: "lantern-street", name: "Lantern street", occasion: true, lines: &["رمضان مبارك"], meaning: "Blessed Ramadan", reference: "Ramadan greeting", font: "Reem Kufi", ink: "#3a1a0c", panel: "#2a140a", accent: "#a8401c", scale: 1.35_f32, bx: [180.0_f32, 300.0_f32, 842.0_f32, 560.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/lantern-street.svg") },
+    Calligraphy { id: "laylat-al-qadr", name: "Laylat al-Qadr", occasion: true, lines: &["ليلة القدر", "خير من ألف شهر"], meaning: "The Night of Decree is better than a thousand months", reference: "Al-Qadr 97:3", font: "Reem Kufi", ink: "#fbf1d0", panel: "#f6f2ea", accent: "#f3d58e", scale: 1.0_f32, bx: [150.0_f32, 90.0_f32, 842.0_f32, 430.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/laylat-al-qadr.svg") },
+    Calligraphy { id: "eid-morning", name: "Eid morning", occasion: true, lines: &["عيد مبارك"], meaning: "Blessed Eid", reference: "Eid al-Fitr greeting", font: "Reem Kufi", ink: "#5a2416", panel: "#3a1a10", accent: "#a8401c", scale: 1.4_f32, bx: [260.0_f32, 300.0_f32, 740.0_f32, 450.0_f32], no_meaning: false, watermark: None, grain: 0.2_f32, svg: include_str!("../assets/calligraphy/eid-morning.svg") },
+    Calligraphy { id: "eid-card", name: "Eid card", occasion: true, lines: &["تقبل الله", "منا ومنكم"], meaning: "May Allah accept from us and from you", reference: "Eid greeting of the Companions", font: "Reem Kufi", ink: "#f4dc9a", panel: "#1d2a22", accent: "#8a6420", scale: 1.05_f32, bx: [318.0_f32, 400.0_f32, 682.0_f32, 680.0_f32], no_meaning: false, watermark: None, grain: 0.18_f32, svg: include_str!("../assets/calligraphy/eid-card.svg") },
+    Calligraphy { id: "day-of-arafah", name: "Day of Arafah", occasion: true, lines: &["لبيك اللهم", "لبيك"], meaning: "Here I am, O Allah, here I am", reference: "The Talbiyah of Hajj", font: "Reem Kufi", ink: "#fff1dc", panel: "#f6f2ea", accent: "#ffd29a", scale: 1.2_f32, bx: [150.0_f32, 80.0_f32, 842.0_f32, 370.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/day-of-arafah.svg") },
+    Calligraphy { id: "eid-prayer-at-the-eidgah", name: "Eid prayer at the eidgah", occasion: true, lines: &["عيد أضحى", "مبارك"], meaning: "Blessed Eid al-Adha", reference: "Eid al-Adha greeting", font: "Reem Kufi", ink: "#24392a", panel: "#1c2a1f", accent: "#7a5a1c", scale: 1.2_f32, bx: [150.0_f32, 60.0_f32, 842.0_f32, 300.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/eid-prayer-at-the-eidgah.svg") },
+    Calligraphy { id: "takbir-of-eid", name: "Takbir of Eid", occasion: true, lines: &["الله أكبر الله أكبر", "لا إله إلا الله", "الله أكبر ولله الحمد"], meaning: "Allah is the Greatest, there is no god but Allah, and to Allah belongs all praise", reference: "Takbir of the Eid days", font: "Reem Kufi", ink: "#f6e3a8", panel: "#f6f2ea", accent: "#e2c27a", scale: 0.8_f32, bx: [150.0_f32, 120.0_f32, 842.0_f32, 400.0_f32], no_meaning: false, watermark: None, grain: 0.0_f32, svg: include_str!("../assets/calligraphy/takbir-of-eid.svg") },
+];
+
 /// Offline library of Quran verses, hadith and adhkar (built by tools/build_content.py).
 pub static CONTENT: &str = include_str!("../assets/content.json");

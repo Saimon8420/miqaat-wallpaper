@@ -76,6 +76,58 @@ def main():
                 continue
             out.append(f"    font!({rs(NAMES.get(i) or FAMILIES.get(i, i))}, {', '.join(rs(f) for f in files[i])}),")
         out.append("];")
+    # Calligraphy scenes (tools/calligraphy/export.py): an SVG background plus where the lettering goes.
+    kufi = {"RK": "Reem Kufi", "NK": "Noto Kufi Arabic", "KF": "Kufam", "EM": "El Messiri", "CH": "Changa",
+            "AX": "Alexandria", "LZ": "Lalezar", "RD": "Readex Pro"}
+    cal = json.loads((ROOT / "assets/calligraphy/scenes.json").read_text(encoding="utf-8"))
+    f32 = lambda v: f"{float(v)}_f32"
+    out += [
+        "",
+        "pub struct Watermark {",
+        "    pub text: &'static str,",
+        "    pub x: f32,",
+        "    pub y: f32,",
+        "    pub size: f32,",
+        "    pub color: &'static str,",
+        "    pub font: &'static str,",
+        "}",
+        "",
+        "/// A calligraphy scene. Coordinates are in a 1600×900 picture whose lettering column is the left 62%.",
+        "pub struct Calligraphy {",
+        "    pub id: &'static str,",
+        "    pub name: &'static str,",
+        "    /// Shown by itself in Ramadan, on Eid and on Arafah, not picked by hand.",
+        "    pub occasion: bool,",
+        "    pub lines: &'static [&'static str],",
+        "    pub meaning: &'static str,",
+        "    pub reference: &'static str,",
+        "    pub font: &'static str,",
+        "    pub ink: &'static str,",
+        "    /// Colour of the clock panel's text on this scene, and its accent.",
+        "    pub panel: &'static str,",
+        "    pub accent: &'static str,",
+        "    pub scale: f32,",
+        "    /// left, top, right, bottom of the lettering box",
+        "    pub bx: [f32; 4],",
+        "    pub no_meaning: bool,",
+        "    pub watermark: Option<Watermark>,",
+        "    pub grain: f32,",
+        "    pub svg: &'static str,",
+        "}",
+        "",
+        "pub static CALLIGRAPHY: &[Calligraphy] = &[",
+    ]
+    for d in cal:
+        wm = d.get("watermark")
+        wms = "None" if not wm else f"Some(Watermark {{ text: {rs(wm['t'])}, x: {f32(wm['x'])}, y: {f32(wm['y'])}, size: {f32(wm['size'])}, color: {rs(wm['c'])}, font: {rs(kufi[wm['f']])} }})"
+        out.append(
+            f"    Calligraphy {{ id: {rs(d['id'])}, name: {rs(d['name'])}, occasion: {str(d['occasion']).lower()}, "
+            f"lines: &[{', '.join(rs(x) for x in d['ar'])}], meaning: {rs(d['en'])}, reference: {rs(d['ref'])}, "
+            f"font: {rs(kufi[d['font']])}, ink: {rs(d['ink'])}, panel: {rs(d['panel'])}, accent: {rs(d['accent'])}, "
+            f"scale: {f32(d['scale'])}, bx: [{', '.join(f32(v) for v in d['box'])}], no_meaning: {str(d['no_meaning']).lower()}, "
+            f"watermark: {wms}, grain: {f32(d['grain'])}, svg: include_str!(\"../assets/calligraphy/{d['id']}.svg\") }},"
+        )
+    out.append("];")
     out += [
         "",
         "/// Offline library of Quran verses, hadith and adhkar (built by tools/build_content.py).",

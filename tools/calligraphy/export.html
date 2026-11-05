@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><body><pre id="out"></pre>
+<script src="scenes.js"></script>
+<script>
+// Writes every scene as JSON: its SVG background and where and how the calligraphy goes.
+const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+const out=D.map(d=>({id:slug(d.n),name:d.n,occasion:d.sec==="occ",tag:d.tag==="pick"?"":d.tag,ar:d.ar,en:d.en,ref:d.ref,font:d.f,ink:d.ink,panel:d.pt,accent:d.gold,scale:d.s||1,box:d.box,no_meaning:!!d.noTr,watermark:d.wm||null,svg:d.bg()}));
+document.getElementById("out").textContent=JSON.stringify(out);
+</script>

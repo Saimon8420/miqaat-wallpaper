@@ -110,6 +110,8 @@ pub struct Settings {
     pub notify_before: u32,
     pub jumuah: bool,
     pub auto_update: bool,
+    // 1.2.0: calligraphy scenes by themselves in Ramadan, on Eid and on Arafah
+    pub occasions: bool,
 }
 
 impl Default for Settings {
@@ -190,6 +192,7 @@ impl Default for Settings {
             notify_before: 10,
             jumuah: true,
             auto_update: true,
+            occasions: true,
         }
     }
 }
@@ -228,9 +231,9 @@ impl Settings {
     /// Fields that change the decoded pictures or fonts (anything else is just a repaint).
     pub fn look_key(&self) -> String {
         format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.scene, self.custom_photo, self.rotate, self.effect, self.grain, self.monitors, self.font_ar, self.font_bn, self.font_en, self.behind,
-            self.clock_font, self.clock_style, self.glass_blur
+            self.clock_font, self.clock_style, self.glass_blur, self.side, self.layout, self.occasions
         )
     }
 }

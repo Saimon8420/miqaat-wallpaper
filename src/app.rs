@@ -12,6 +12,13 @@ use windows::Win32::Foundation::RECT;
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
 
+/// What a monitor shows: one of the built-in photos or a calligraphy scene.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Pic {
+    Photo(usize),
+    Cal(usize),
+}
+
 pub struct App {
     pub s: Settings,
     pub month: Option<Month>,
@@ -40,7 +47,7 @@ pub struct App {
     /// A full-screen game or video is running.
     pub busy: bool,
     pub light_key: [i32; 5],
-    pub scene_key: Vec<usize>,
+    pub scene_key: Vec<Pic>,
     pub scene_offset: usize,
     pub notified: Vec<(i64, usize)>,
     pub user_wallpaper: String,
@@ -161,22 +168,52 @@ impl App {
 
     // ---------- pictures ----------
 
-    /// Which built-in scene each monitor shows (index into SCENES).
-    pub fn scenes_now(&self) -> Vec<usize> {
-        let n = crate::assets::SCENES.len();
+    /// Which picture each monitor shows. On Ramadan and Eid days the calligraphy scene for the
+    /// day comes first; otherwise the chosen photo or calligraphy, rotating within its own set.
+    pub fn scenes_now(&self) -> Vec<Pic> {
         let (days, sec) = self.now();
+        let count = self.monitors.len().max(1);
+        if self.s.occasions {
+            if let Some(i) = self.hijri(days).and_then(|h| crate::calligraphy::occasion(h.month, h.day)) {
+                return vec![Pic::Cal(i); count];
+            }
+        }
+        let cal = self.s.scene.strip_prefix("cal:");
+        // a Ramadan or Eid scene named directly (only to preview it) is shown as it is
+        if let Some(i) = cal.and_then(crate::calligraphy::index).filter(|&i| crate::assets::CALLIGRAPHY[i].occasion) {
+            return vec![Pic::Cal(i); count];
+        }
+        let list: Vec<Pic> = match cal {
+            Some(_) => crate::calligraphy::everyday().into_iter().map(Pic::Cal).collect(),
+            None => (0..crate::assets::SCENES.len()).map(Pic::Photo).collect(),
+        };
+        let n = list.len();
         let base = match self.s.rotate.as_str() {
             "daily" => days.rem_euclid(n as i64) as usize,
             "prayer" => {
                 let part = self.day(days).map(|d| d.minutes.iter().filter(|&&m| m <= sec / 60).count()).unwrap_or(0);
                 ((days * 7 + part as i64).rem_euclid(n as i64)) as usize
             }
-            _ => crate::assets::SCENES.iter().position(|x| x.id == self.s.scene).unwrap_or(0),
+            _ => match cal {
+                Some(id) => crate::calligraphy::index(id).and_then(|i| list.iter().position(|p| *p == Pic::Cal(i))).unwrap_or(0),
+                None => crate::assets::SCENES.iter().position(|x| x.id == self.s.scene).unwrap_or(0),
+            },
         };
-        (0..self.monitors.len().max(1)).map(|k| (base + self.scene_offset + if self.s.monitors == "different" { k } else { 0 }) % n).collect()
+        (0..count).map(|k| list[(base + self.scene_offset + if self.s.monitors == "different" { k } else { 0 }) % n]).collect()
     }
 
-    fn photos(&self, scenes: &[usize]) -> Vec<(Photo, u32, u32)> {
+    /// The calligraphy scene on the main screen, if one is showing.
+    pub fn calligraphy_now(&self) -> Option<&'static crate::assets::Calligraphy> {
+        let scenes = if self.scene_key.is_empty() { self.scenes_now() } else { self.scene_key.clone() };
+        match scenes.get(self.primary).or(scenes.first()) {
+            Some(Pic::Cal(i)) => crate::assets::CALLIGRAPHY.get(*i),
+            _ => None,
+        }
+    }
+
+    fn photos(&self, scenes: &[Pic]) -> Vec<(Photo, u32, u32)> {
+        // mirror a scene when the clock is on the left, so its lettering stays on the free side
+        let flip = self.s.side == "left" && matches!(self.s.layout.as_str(), "column" | "corner");
         let custom = self.s.scene == "custom" && std::path::Path::new(&self.s.custom_photo).exists();
         self.monitors
             .iter()
@@ -185,10 +222,12 @@ impl App {
                 let size = ((m.right - m.left).max(1) as u32, (m.bottom - m.top).max(1) as u32);
                 let src = if self.s.monitors == "main" && k != self.primary && std::path::Path::new(&self.user_wallpaper).exists() {
                     Photo::File(self.user_wallpaper.clone())
-                } else if custom {
-                    Photo::File(self.s.custom_photo.clone())
                 } else {
-                    Photo::Embedded(crate::assets::SCENES[scenes[k]].jpg)
+                    match scenes[k] {
+                        Pic::Cal(i) => Photo::Calligraphy(i, flip, self.s.font_en.clone()),
+                        Pic::Photo(_) if custom => Photo::File(self.s.custom_photo.clone()),
+                        Pic::Photo(i) => Photo::Embedded(crate::assets::SCENES[i].jpg),
+                    }
                 };
                 (src, size.0, size.1)
             })
@@ -209,7 +248,7 @@ impl App {
             .ok();
         if self.renderer.is_none() && self.s.scene == "custom" {
             // A broken custom photo shouldn't leave a black desktop.
-            let fallback: Vec<_> = photos.iter().enumerate().map(|(k, p)| (Photo::Embedded(crate::assets::SCENES[scenes[k]].jpg), p.1, p.2)).collect();
+            let fallback: Vec<_> = photos.iter().enumerate().map(|(k, p)| (Photo::Embedded(crate::assets::SCENES[if let Pic::Photo(i) = scenes[k] { i } else { 0 }].jpg), p.1, p.2)).collect();
             self.renderer = Renderer::new(&fallback, &self.s.effect, self.s.grain, self.s.behind == "glass", self.s.glass_blur, &self.s.font_ar, &self.s.font_bn, &self.s.font_en, &self.clock_font_name()).ok();
         }
         self.look_key = key;
@@ -247,7 +286,7 @@ impl App {
 
     pub fn style(&self) -> Style {
         let l = self.lang();
-        Style {
+        let mut st = Style {
             layout: self.s.layout.clone(),
             side_left: self.s.side == "left",
             behind: self.s.behind.clone(),
@@ -287,7 +326,18 @@ impl App {
                 _ => 1.4,
             },
             dividers: self.s.dividers,
+        };
+        // A calligraphy scene brings its own panel colours; on a light one the text is dark and
+        // nothing dark goes behind it.
+        if let Some(c) = self.calligraphy_now() {
+            st.tone = crate::render::parse_hex(c.panel).unwrap_or(st.tone);
+            st.accent = crate::render::parse_hex(c.accent).unwrap_or(st.accent);
+            if crate::calligraphy::light(c) {
+                st.behind = "none".into();
+                st.shadow = 0;
+            }
         }
+        st
     }
 
     /// The clock's font: the chosen one, else the English font (Playfair for the old "serif" style).
@@ -397,7 +447,11 @@ impl App {
         });
 
         let saving = self.battery_saving();
-        let light = crate::light::at(now, &minutes, self.s.night_dark.min(100) as f32 / 100.0, self.s.light_follows);
+        let mut light = crate::light::at(now, &minutes, self.s.night_dark.min(100) as f32 / 100.0, self.s.light_follows);
+        // A light calligraphy scene keeps its dark text readable: no night darkening on it.
+        if self.calligraphy_now().map(crate::calligraphy::light).unwrap_or(false) {
+            light.dark = 0.0;
+        }
         let zoom = if self.s.drift && !saving {
             let t = (times::utc_seconds() / 60) as f32 % 40.0 / 40.0;
             1.0 + 0.04 * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos())
