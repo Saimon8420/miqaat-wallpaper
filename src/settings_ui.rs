@@ -776,7 +776,7 @@ impl Ui {
                 66.0 + n * (th + 8.0) - 8.0 + 16.0
             }
             Ctl::Font(_) => 80.0,
-            Ctl::About => 100.0,
+            Ctl::About => 172.0,
             Ctl::Screens => 66.0 + 112.0,
             Ctl::Kinds | Ctl::Shows | Ctl::DateParts => (self.chip_lines(&self.chip_labels(i)).len() as f32 * 34.0 + 26.0).max(66.0),
             _ if r.hint.is_empty() && !matches!(r.ctl, Ctl::City) => 56.0,
@@ -1169,14 +1169,22 @@ impl Ui {
         self.text(t, &format!("Miqaat Wallpaper {}", crate::install::VERSION), &Fam::Ui, rc(l, y + 10.0, right, y + 30.0), 14.0, 400, th.ink, 0)?;
         let src = "Prayer times: Miqaat API · Quran: holy-quran · Hadith: hadith-api · Adhkar: Hisn al-Muslim";
         self.text(t, src, &Fam::Ui, rc(l, y + 30.0, right, y + 48.0), 12.0, 400, th.ink2, 0)?;
-        let mut x = l;
-        for (k, label) in ["Project page", "Photo credits", "Uninstall…"].iter().enumerate() {
-            let w = self.measure(label, 13.5, 400) + 30.0;
-            let r = rc(x, y + 58.0, x + w, y + 90.0);
-            rr(t, r, 6.0, Some(if self.hovered(Act::Button(k)) { th.sel } else { th.ctl }), Some(th.ctlb))?;
-            self.text(t, label, &Fam::Ui, r, 13.5, 400, th.ink, 1)?;
-            self.hit(r, Act::Button(k));
-            x += w + 8.0;
+        // Two rows of buttons: the app, then the developer.
+        let rows: [(f32, &[(usize, &str)]); 2] = [
+            (y + 58.0, &[(0, "Source on GitHub"), (1, "Photo credits"), (2, "Uninstall…")]),
+            (y + 128.0, &[(3, "GitHub"), (4, "LinkedIn"), (5, "Portfolio")]),
+        ];
+        self.text(t, "Made by Md. Latiful Kabir", &Fam::Ui, rc(l, y + 100.0, right, y + 120.0), 13.0, 600, th.ink, 0)?;
+        for (top, items) in rows {
+            let mut x = l;
+            for &(k, label) in items {
+                let w = self.measure(label, 13.5, 400) + 30.0;
+                let r = rc(x, top, x + w, top + 32.0);
+                rr(t, r, 6.0, Some(if self.hovered(Act::Button(k)) { th.sel } else { th.ctl }), Some(th.ctlb))?;
+                self.text(t, label, &Fam::Ui, r, 13.5, 400, th.ink, 1)?;
+                self.hit(r, Act::Button(k));
+                x += w + 8.0;
+            }
         }
         Ok(())
     }
@@ -1826,11 +1834,15 @@ fn act(a: Act, r: R, x: f32, y: f32) {
         Act::Button(k) => match k {
             0 => crate::tray::open_url(crate::install::REPO),
             1 => crate::tray::open_url(&format!("{}/blob/main/CREDITS.md", crate::install::REPO)),
-            _ => {
+            3 => crate::tray::open_url("https://github.com/Saimon8420"),
+            4 => crate::tray::open_url("https://www.linkedin.com/in/latiful-kabir567"),
+            5 => crate::tray::open_url("https://my-portfolio-seven-delta-60.vercel.app"),
+            2 => {
                 if let Ok(exe) = std::env::current_exe() {
                     let _ = std::process::Command::new(exe).arg("--uninstall").spawn();
                 }
             }
+            _ => {}
         },
         Act::Screen(k) => {
             // pick any combination by clicking the screens
