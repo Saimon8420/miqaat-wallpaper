@@ -46,6 +46,14 @@ pub struct App {
     pub user_wallpaper: String,
     /// Pretend it is this second of the day (snapshots of other hours).
     pub fake_now: Option<u32>,
+    /// Days until Ramadan, Eid al-Fitr and Eid al-Adha, and the city day they were fetched for.
+    pub events: Option<(i64, [i64; 3])>,
+    pub events_fetching: bool,
+    /// A newer release: (version, download link).
+    pub update: Option<(String, String)>,
+    /// When the events and the update were last asked for (seconds since 1970).
+    pub events_try: i64,
+    pub update_checked: i64,
 }
 
 /// The PC's own offset from UTC in minutes (used until a month of times is loaded).
@@ -102,6 +110,11 @@ impl App {
             notified: vec![],
             user_wallpaper: String::new(),
             fake_now: None,
+            events: None,
+            events_fetching: false,
+            update: None,
+            events_try: 0,
+            update_checked: 0,
         }
     }
 
@@ -190,13 +203,13 @@ impl App {
         }
         self.renderer = None; // free the old pictures first
         let photos = self.photos(&scenes);
-        self.renderer = Renderer::new(&photos, &self.s.effect, self.s.grain, self.s.behind == "glass", &self.s.font_ar, &self.s.font_bn, &self.s.font_en)
+        self.renderer = Renderer::new(&photos, &self.s.effect, self.s.grain, self.s.behind == "glass", self.s.glass_blur, &self.s.font_ar, &self.s.font_bn, &self.s.font_en, &self.clock_font_name())
             .map_err(|e| crate::log(&format!("renderer: {e}")))
             .ok();
         if self.renderer.is_none() && self.s.scene == "custom" {
             // A broken custom photo shouldn't leave a black desktop.
             let fallback: Vec<_> = photos.iter().enumerate().map(|(k, p)| (Photo::Embedded(crate::assets::SCENES[scenes[k]].jpg), p.1, p.2)).collect();
-            self.renderer = Renderer::new(&fallback, &self.s.effect, self.s.grain, self.s.behind == "glass", &self.s.font_ar, &self.s.font_bn, &self.s.font_en).ok();
+            self.renderer = Renderer::new(&fallback, &self.s.effect, self.s.grain, self.s.behind == "glass", self.s.glass_blur, &self.s.font_ar, &self.s.font_bn, &self.s.font_en, &self.clock_font_name()).ok();
         }
         self.look_key = key;
         self.scene_key = scenes;
@@ -251,6 +264,39 @@ impl App {
             together: self.s.spacing != "spread",
             times_style: self.s.times_style.clone(),
             monitor_style: self.s.monitor_style.clone(),
+            clock_scale: self.s.clock_size.clamp(60, 140) as f32 / 100.0,
+            progress_style: self.s.progress_style.clone(),
+            caps: self.s.caps,
+            tone: match self.s.text_tone.as_str() {
+                "warm" => [0.99, 0.92, 0.80],
+                "cool" => [0.90, 0.95, 1.0],
+                _ => [0.97, 0.95, 0.92],
+            },
+            shadow: match (self.s.text_shadow.as_str(), self.s.behind.as_str()) {
+                ("strong", _) => 2,
+                ("soft", _) | (_, "none") => 1,
+                _ => 0,
+            },
+            ar_right: self.s.ar_align == "right",
+            col_w: self.s.col_width.clamp(22, 46) as f32,
+            glass_light: self.s.glass_tint == "light",
+            corner_r: match self.s.corners.as_str() {
+                "square" => 0.3,
+                "very" => 2.6,
+                _ => 1.4,
+            },
+            dividers: self.s.dividers,
+        }
+    }
+
+    /// The clock's font: the chosen one, else the English font (Playfair for the old "serif" style).
+    pub fn clock_font_name(&self) -> String {
+        if !self.s.clock_font.is_empty() {
+            self.s.clock_font.clone()
+        } else if self.s.clock_style == "serif" {
+            "Playfair Display".into()
+        } else {
+            self.s.font_en.clone()
         }
     }
 
@@ -278,11 +324,18 @@ impl App {
             Lang::Ar => 2,
         }][times::weekday(days) as usize];
         let h = self.hijri(days);
-        let mut meta = vec![wd.to_string()];
-        if let Some(h) = h {
+        let mut meta = vec![];
+        if self.s.show_weekday {
+            meta.push(wd.to_string());
+        }
+        if let (Some(h), true) = (h, self.s.show_hijri) {
             meta.push(h.text(l));
         }
-        if !place.is_empty() {
+        if self.s.show_date {
+            let (y, m, d) = times::civil_from_days(days);
+            meta.push(crate::extras::gregorian(l, y, m, d));
+        }
+        if !place.is_empty() && self.s.show_city {
             meta.push(place);
         }
 
@@ -298,9 +351,15 @@ impl App {
             let prev = if ni == 0 { t[5] as i64 - if now >= t[5] { 0 } else { 1440 } } else { t[ni - 1] as i64 };
             let span = (at as i64 - prev).max(1) as f32;
             progress = (now as i64 - prev) as f32 / span;
-            next = i18n::digits(l, false, &i18n::next_in(l, i18n::prayer(l, ni), at - now));
+            let (at_t, at_ap) = self.fmt_time(at % 1440);
+            let at_text = if at_ap.is_empty() { at_t } else { format!("{at_t} {at_ap}") };
+            next = crate::extras::countdown(l, &self.s.countdown, i18n::prayer(l, ni), at - now, &at_text);
             let cur = (0..6).filter(|&i| i != 1 && t[i] <= now).last().unwrap_or(5);
-            rows = (0..6).map(|i| (i18n::prayer(l, i).to_string(), self.fmt_time(t[i]).0, i == cur)).collect();
+            let mark = if self.s.highlight == "next" { ni } else { cur };
+            rows = (0..6)
+                .filter(|&i| i != 1 || self.s.show_sunrise)
+                .map(|i| (i18n::prayer(l, i).to_string(), self.fmt_time(t[i]).0, i == mark))
+                .collect();
         } else {
             (progress, rows) = (0.0, vec![]);
             next = i18n::phrase(l, if self.failed { "offline" } else { "loading" }).to_string();
@@ -328,6 +387,13 @@ impl App {
             };
             source = if it.grade.is_empty() { it.reference.clone() } else { format!("{} · {}", it.reference, it.grade) };
         }
+
+        let fasting = if self.s.show_fasting { self.fasting_line(days, now) } else { None };
+        let event = if self.s.show_event { self.events.and_then(|(d, e)| (d == days).then_some(e)).and_then(|e| crate::extras::event(l, e)) } else { None };
+        let qibla = self.s.show_qibla.then(|| {
+            let deg = crate::extras::qibla(self.s.lat, self.s.lng);
+            (deg as f32, crate::extras::qibla_text(l, deg))
+        });
 
         let saving = self.battery_saving();
         let light = crate::light::at(now, &minutes, self.s.night_dark.min(100) as f32 / 100.0, self.s.light_follows);
@@ -364,7 +430,40 @@ impl App {
             light,
             zoom,
             monitor,
+            fasting,
+            event,
+            qibla,
         }
+    }
+
+    /// Is `days` a day of fasting: Ramadan, or a sunnah fast the special-days list points to?
+    fn fasting_day(&self, days: i64) -> bool {
+        self.hijri(days)
+            .map(|h| h.month == 9 || hijri::special(h, times::weekday(days), self.lang()).map(|s| s.heads_up).unwrap_or(false))
+            .unwrap_or(false)
+    }
+
+    /// Suhoor and iftar countdowns on fasting days, and a heads-up the evening before one.
+    fn fasting_line(&self, days: i64, now: u32) -> Option<String> {
+        let l = self.lang();
+        let d = self.day(days)?;
+        let [suhoor, iftar] = d.fast.unwrap_or([d.minutes[0].saturating_sub(10), d.minutes[4]]);
+        let at = |m: u32| {
+            let (t, ap) = self.fmt_time(m);
+            if ap.is_empty() { t } else { format!("{t} {ap}") }
+        };
+        if self.fasting_day(days) && now < iftar {
+            return Some(if now < suhoor {
+                crate::extras::fasting(l, "suhoor", Some(suhoor - now), &at(suhoor))
+            } else {
+                crate::extras::fasting(l, "iftar", Some(iftar - now), &at(iftar))
+            });
+        }
+        if now >= d.minutes[4] && self.fasting_day(days + 1) {
+            let next = self.day(days + 1).and_then(|n| n.fast.map(|f| f[0]).or(Some(n.minutes[0].saturating_sub(10)))).unwrap_or(suhoor);
+            return Some(crate::extras::fasting(l, "tomorrow", None, &at(next)));
+        }
+        None
     }
 
     /// Indexes into `monitors` in screen order: left to right, then top to bottom. "Screen 1"
@@ -428,6 +527,24 @@ impl App {
                 out.push((format!("{} {}", i18n::phrase(l, "time_for"), i18n::prayer(l, i)), format!("{t} {ap} · {}", self.s.place)));
             }
         }
+        // A few minutes before each prayer, and before Jumu'ah on Fridays.
+        let before = self.s.notify_before;
+        let friday = times::weekday(days) == 5;
+        for i in [0usize, 2, 3, 4, 5] {
+            if friday && i == 2 && self.s.jumuah {
+                let lead = before.max(30);
+                if d.minutes[2] >= lead && d.minutes[2] - lead == now && !self.notified.contains(&(days, 20)) {
+                    self.notified.push((days, 20));
+                    out.push(crate::extras::jumuah(l, lead));
+                }
+                continue;
+            }
+            if before > 0 && d.minutes[i] >= before && d.minutes[i] - before == now && !self.notified.contains(&(days, 10 + i)) {
+                self.notified.push((days, 10 + i));
+                let (t, ap) = self.fmt_time(d.minutes[i]);
+                out.push((crate::extras::before_prayer(l, i18n::prayer(l, i), before), format!("{t} {ap} · {}", self.s.place)));
+            }
+        }
         // The evening before a fasting day, a heads-up at Maghrib.
         if self.s.special_days && d.minutes[4] == now && !self.notified.contains(&(days, 9)) {
             self.notified.push((days, 9));
@@ -449,7 +566,7 @@ mod tests {
     use super::*;
 
     fn month(key: &str, days: &[(&str, &str)]) -> Month {
-        Month { key: key.into(), offset: 360, days: days.iter().map(|(d, h)| Day { date: d.to_string(), hijri: h.to_string(), minutes: [280, 355, 710, 950, 1065, 1140] }).collect() }
+        Month { key: key.into(), offset: 360, days: days.iter().map(|(d, h)| Day { date: d.to_string(), hijri: h.to_string(), minutes: [280, 355, 710, 950, 1065, 1140], fast: None }).collect() }
     }
 
     #[test]

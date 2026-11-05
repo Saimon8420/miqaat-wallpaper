@@ -73,6 +73,43 @@ pub struct Settings {
     /// Where the clock panel goes when several screens are connected: "main", "all", or screen
     /// numbers counted left to right, e.g. "1,3".
     pub panel_on: String,
+    // 1.1.3: design
+    /// "" = same as the English font.
+    pub clock_font: String,
+    pub clock_size: u32,
+    /// "in", "at" or "timer".
+    pub countdown: String,
+    /// "line", "dots", "ring" or "off".
+    pub progress_style: String,
+    pub show_weekday: bool,
+    pub show_hijri: bool,
+    pub show_date: bool,
+    pub show_city: bool,
+    pub caps: bool,
+    /// "white", "warm" or "cool".
+    pub text_tone: String,
+    /// "off", "soft" or "strong".
+    pub text_shadow: String,
+    /// "layout" or "right".
+    pub ar_align: String,
+    pub col_width: u32,
+    /// "dark" or "light".
+    pub glass_tint: String,
+    pub glass_blur: u32,
+    /// "square", "round" or "very".
+    pub corners: String,
+    pub show_sunrise: bool,
+    /// "current" or "next".
+    pub highlight: String,
+    pub dividers: bool,
+    // 1.1.3: features
+    pub show_fasting: bool,
+    pub show_qibla: bool,
+    pub show_event: bool,
+    /// Minutes before each prayer for a reminder notification (0 = off).
+    pub notify_before: u32,
+    pub jumuah: bool,
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -128,6 +165,31 @@ impl Default for Settings {
             monitor_every: 2,
             monitors: "same".into(),
             panel_on: "main".into(),
+            clock_font: String::new(),
+            clock_size: 100,
+            countdown: "in".into(),
+            progress_style: "line".into(),
+            show_weekday: true,
+            show_hijri: true,
+            show_date: false,
+            show_city: true,
+            caps: true,
+            text_tone: "white".into(),
+            text_shadow: "off".into(),
+            ar_align: "layout".into(),
+            col_width: 31,
+            glass_tint: "dark".into(),
+            glass_blur: 10,
+            corners: "round".into(),
+            show_sunrise: true,
+            highlight: "current".into(),
+            dividers: true,
+            show_fasting: true,
+            show_qibla: true,
+            show_event: true,
+            notify_before: 10,
+            jumuah: true,
+            auto_update: true,
         }
     }
 }
@@ -166,8 +228,9 @@ impl Settings {
     /// Fields that change the decoded pictures or fonts (anything else is just a repaint).
     pub fn look_key(&self) -> String {
         format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-            self.scene, self.custom_photo, self.rotate, self.effect, self.grain, self.monitors, self.font_ar, self.font_bn, self.font_en, self.behind
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            self.scene, self.custom_photo, self.rotate, self.effect, self.grain, self.monitors, self.font_ar, self.font_bn, self.font_en, self.behind,
+            self.clock_font, self.clock_style, self.glass_blur
         )
     }
 }

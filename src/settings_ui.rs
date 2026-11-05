@@ -41,7 +41,8 @@ const MR: f32 = 872.0; // page right
 const SECTIONS: [&str; 6] = ["Location & times", "Reminders", "Picture & light", "Design", "Fonts & language", "System"];
 const ROTATE: [(&str, &str); 3] = [("keep", "Keep"), ("daily", "Every day"), ("prayer", "Each prayer")];
 const KINDS: [(&str, &str); 6] = [("quran", "Quran"), ("hadith", "Hadith"), ("dua", "Dua"), ("dhikr", "Dhikr"), ("istighfar", "Istighfar"), ("durood", "Durood")];
-const SHOWS: [(&str, &str); 5] = [("show_next", "Next prayer"), ("show_reminder", "Reminder"), ("show_special", "Special day"), ("show_times", "Prayer row"), ("show_monitor", "System monitor")];
+const SHOWS: [(&str, &str); 8] = [("show_next", "Next prayer"), ("show_reminder", "Reminder"), ("show_special", "Special day"), ("show_times", "Prayer row"), ("show_monitor", "System monitor"), ("show_fasting", "Fasting times"), ("show_qibla", "Qibla"), ("show_event", "Next event")];
+const DATEPARTS: [(&str, &str); 4] = [("show_weekday", "Weekday"), ("show_hijri", "Hijri date"), ("show_date", "Date"), ("show_city", "City")];
 const PRESETS: [&str; 5] = ["gold", "emerald", "sky", "rose", "pearl"];
 const CITY_LIST: usize = usize::MAX;
 const WM_CITIES: u32 = WM_APP + 21;
@@ -57,9 +58,10 @@ enum Ctl {
     /// A font list ('a' Arabic, 'b' Bangla, 'e' English) with a sample in the chosen font.
     Font(char),
     Switch,
-    Slider(i64, i64),
+    Slider(i64, i64, &'static str),
     Kinds,
     Shows,
+    DateParts,
     City,
     Pictures,
     Accent,
@@ -101,6 +103,8 @@ fn rows() -> Vec<Row> {
         r(0, "", "Hijri date", "Moon sighting differs by country; in Bangladesh it is often −1", "hijri_adjust", seg(&[("-2", "−2"), ("-1", "−1"), ("0", "0"), ("1", "+1"), ("2", "+2")])),
         r(0, "Clock and alerts", "Clock", "How times are written", "clock24", seg(&[("false", "12-hour"), ("true", "24-hour")])),
         r(0, "Clock and alerts", "Notify at prayer times", "A small Windows notification, no sound", "notify", Ctl::Switch),
+        r(0, "Clock and alerts", "Remind before prayer", "A quiet notification before each prayer", "notify_before", seg(&[("0", "Off"), ("5", "5 min"), ("10", "10 min"), ("15", "15 min"), ("30", "30 min")])),
+        r(0, "Clock and alerts", "Jumu'ah reminder", "Before Friday prayer: read al-Kahf, send durood", "jumuah", Ctl::Switch),
         r(1, "", "Show", "Pick the kinds of reminders", "kinds", Ctl::Kinds),
         r(1, "", "Change every", "A new reminder fades in", "interval", seg(&[("5", "5m"), ("10", "10m"), ("15", "15m"), ("30", "30m"), ("60", "1h")])),
         r(1, "", "Meaning", "Shown under the Arabic", "meaning", seg(&[("en", "English"), ("bn", "বাংলা"), ("none", "Arabic only")])),
@@ -108,26 +112,42 @@ fn rows() -> Vec<Row> {
         r(1, "Smart timing", "Special days", "White Days, Monday/Thursday fasts, Ashura, Arafah, Ramadan…", "special_days", Ctl::Switch),
         r(2, "", "Picture", "One of 20 places, or your own photo", "scene", Ctl::Pictures),
         r(2, "Light", "Light follows the sky", "Rose at Fajr, gold at sunrise, warm at Asr, orange at Maghrib, blue at Isha", "light_follows", Ctl::Switch),
-        r(2, "Light", "Night darkness", "How dark the picture gets after Isha", "night_dark", Ctl::Slider(0, 100)),
-        r(2, "Light", "Panel shade", "How dark the area behind the text is", "shade", Ctl::Slider(0, 100)),
+        r(2, "Light", "Night darkness", "How dark the picture gets after Isha", "night_dark", Ctl::Slider(0, 100, "%")),
+        r(2, "Light", "Panel shade", "How dark the area behind the text is", "shade", Ctl::Slider(0, 100, "%")),
         r(2, "Effects", "Picture effect", "", "effect", seg(&[("none", "Natural"), ("warm", "Warm"), ("cool", "Cool"), ("mono", "B&W"), ("blur", "Blur")])),
         r(2, "Effects", "Slow camera drift", "A gentle zoom, redrawn once a minute", "drift", Ctl::Switch),
         r(2, "Effects", "Film grain", "", "grain", Ctl::Switch),
         r(3, "", "Layout", "How the information sits on the picture", "layout", seg(&[("column", "Column"), ("centre", "Centre"), ("corner", "Corner"), ("bar", "Bar")])),
         r(3, "", "Side", "Put the text away from your icons", "side", seg(&[("left", "Left"), ("right", "Right")])),
         r(3, "", "Spacing", "Together keeps the clock, reminder and times as one block", "spacing", seg(&[("together", "Together"), ("spread", "Spread")])),
-        r(3, "", "Prayer times", "How today's times are shown", "times_style", seg(&[("row", "Row"), ("grid", "Cards"), ("list", "List"), ("timeline", "Timeline")])),
-        r(3, "", "System monitor", "CPU, memory, GPU, disk and network", "monitor_style", seg(&[("lines", "Lines"), ("bars", "Bars"), ("rings", "Rings"), ("text", "Compact"), ("off", "Off")])),
         r(3, "", "Behind the text", "", "behind", seg(&[("shade", "Soft shade"), ("glass", "Glass card"), ("none", "Nothing")])),
         r(3, "", "Accent colour", "Headings, the progress line and the current prayer", "accent", Ctl::Accent),
         r(3, "", "Show on wallpaper", "", "", Ctl::Shows),
-        r(3, "Clock", "Clock style", "", "clock_style", seg(&[("thin", "Thin"), ("bold", "Bold"), ("serif", "Serif")])),
+        r(3, "Clock", "Clock font", "", "clock_font", Ctl::Font('c')),
+        r(3, "Clock", "Clock weight", "", "clock_style", seg(&[("thin", "Thin"), ("light", "Light"), ("bold", "Bold")])),
+        r(3, "Clock", "Clock size", "", "clock_size", Ctl::Slider(70, 130, "%")),
+        r(3, "Clock", "Countdown", "How the time to the next prayer is written", "countdown", seg(&[("in", "Asr in 1h 05m"), ("at", "Asr 3:04 · in 1h"), ("timer", "1:05 to Asr")])),
+        r(3, "Clock", "Progress", "Time until the next prayer", "progress_style", seg(&[("line", "Line"), ("dots", "Dots"), ("ring", "Ring"), ("off", "Off")])),
         r(3, "Clock", "Arabic digits", "Arabic-Indic digits for the clock and times", "arabic_digits", Ctl::Switch),
         r(3, "Clock", "Show seconds", "Redraws only the clock, once a second", "seconds", Ctl::Switch),
-        r(3, "Clock", "Text size", "", "text_size", Ctl::Slider(80, 130)),
+        r(3, "Date line", "Show", "", "", Ctl::DateParts),
+        r(3, "Date line", "Capital letters", "For the date line and labels", "caps", Ctl::Switch),
+        r(3, "Text", "Text size", "", "text_size", Ctl::Slider(80, 130, "%")),
+        r(3, "Text", "Text colour", "", "text_tone", seg(&[("white", "White"), ("warm", "Warm"), ("cool", "Cool")])),
+        r(3, "Text", "Text shadow", "Helps on bright pictures", "text_shadow", seg(&[("off", "Off"), ("soft", "Soft"), ("strong", "Strong")])),
+        r(3, "Text", "Arabic alignment", "", "ar_align", seg(&[("layout", "With the layout"), ("right", "Right")])),
+        r(3, "Text", "Column width", "", "col_width", Ctl::Slider(26, 42, "")),
+        r(3, "Glass card", "Glass tint", "When Behind the text is Glass card", "glass_tint", seg(&[("dark", "Dark"), ("light", "Light")])),
+        r(3, "Glass card", "Glass blur", "", "glass_blur", Ctl::Slider(0, 30, "")),
+        r(3, "Glass card", "Card corners", "", "corners", seg(&[("square", "Square"), ("round", "Round"), ("very", "Very round")])),
+        r(3, "Prayer times", "Style", "How today's times are shown", "times_style", seg(&[("row", "Row"), ("grid", "Cards"), ("list", "List"), ("timeline", "Timeline")])),
+        r(3, "Prayer times", "Show sunrise", "", "show_sunrise", Ctl::Switch),
+        r(3, "Prayer times", "Highlight", "", "highlight", seg(&[("current", "Current prayer"), ("next", "Next prayer")])),
+        r(3, "Prayer times", "Divider lines", "", "dividers", Ctl::Switch),
+        r(3, "System monitor", "Style", "CPU, memory, GPU, disk and network", "monitor_style", seg(&[("lines", "Lines"), ("bars", "Bars"), ("rings", "Rings"), ("text", "Compact"), ("off", "Off")])),
         r(4, "", "Wallpaper language", "Labels and prayer names", "lang", seg(&[("en", "English"), ("bn", "বাংলা"), ("ar", "العربية")])),
         r(4, "", "Arabic font", "", "font_ar", Ctl::Font('a')),
-        r(4, "", "Arabic size", "Bigger is easier to read from a distance", "ar_size", Ctl::Slider(80, 140)),
+        r(4, "", "Arabic size", "Bigger is easier to read from a distance", "ar_size", Ctl::Slider(80, 140, "%")),
         r(4, "", "Bangla font", "", "font_bn", Ctl::Font('b')),
         r(4, "", "English font", "", "font_en", Ctl::Font('e')),
         r(5, "", "Start with Windows", "", "autostart", Ctl::Switch),
@@ -136,6 +156,7 @@ fn rows() -> Vec<Row> {
         r(5, "", "System monitor refresh", "Only the small strip is redrawn", "monitor_every", seg(&[("2", "2 s"), ("5", "5 s"), ("10", "10 s")])),
         r(5, "", "Show the clock and reminders on", "", "panel_on", Ctl::Screens),
         r(5, "", "Monitors", "Each screen can have its own picture", "monitors", seg(&[("same", "Same"), ("different", "Different"), ("main", "Main only")])),
+        r(5, "", "Check for updates", "Once a day, from GitHub; you choose when to install", "auto_update", Ctl::Switch),
         r(5, "About", "About", "", "", Ctl::About),
     ]
 }
@@ -144,7 +165,7 @@ fn fonts_of(c: char) -> &'static [crate::assets::Font] {
     match c {
         'a' => crate::assets::ARABIC_FONTS,
         'b' => crate::assets::BANGLA_FONTS,
-        _ => crate::assets::ENGLISH_FONTS,
+        _ => crate::assets::ENGLISH_FONTS, // 'e' and 'c' (the clock)
     }
 }
 
@@ -152,6 +173,7 @@ fn sample(c: char) -> &'static str {
     match c {
         'a' => "سُبْحَانَ اللَّهِ وَبِحَمْدِهِ",
         'b' => "ফজর বাকি ৭ ঘণ্টা ১০ মিনিট",
+        'c' => "11:39",
         _ => "Fajr in 7h 10m · 4:40 am",
     }
 }
@@ -718,6 +740,7 @@ impl Ui {
     fn chip_labels(&self, i: usize) -> Vec<&'static str> {
         match self.rows[i].ctl {
             Ctl::Kinds => KINDS.iter().map(|k| k.1).collect(),
+            Ctl::DateParts => DATEPARTS.iter().map(|k| k.1).collect(),
             _ => SHOWS.iter().map(|k| k.1).collect(),
         }
     }
@@ -755,7 +778,7 @@ impl Ui {
             Ctl::Font(_) => 80.0,
             Ctl::About => 100.0,
             Ctl::Screens => 66.0 + 112.0,
-            Ctl::Kinds | Ctl::Shows => (self.chip_lines(&self.chip_labels(i)).len() as f32 * 34.0 + 26.0).max(66.0),
+            Ctl::Kinds | Ctl::Shows | Ctl::DateParts => (self.chip_lines(&self.chip_labels(i)).len() as f32 * 34.0 + 26.0).max(66.0),
             _ if r.hint.is_empty() && !matches!(r.ctl, Ctl::City) => 56.0,
             _ => 66.0,
         }
@@ -813,16 +836,19 @@ impl Ui {
                 let label = o.iter().find(|x| x.0 == plain(&cur)).map(|x| x.1.as_str()).unwrap_or("");
                 self.dropdown(t, th, i, label, 300.0, right, cy)?
             }
-            Ctl::Font(_) => self.dropdown(t, th, i, &plain(&cur), 230.0, right, y + 40.0)?,
+            Ctl::Font(c) => {
+                let label = if *c == 'c' && plain(&cur).is_empty() { "Same as the English font".to_string() } else { plain(&cur) };
+                self.dropdown(t, th, i, &label, 230.0, right, y + 40.0)?
+            }
             Ctl::Switch => self.switch(t, th, i, cur.as_bool().unwrap_or(false), right, cy)?,
-            Ctl::Slider(lo, hi) => {
+            Ctl::Slider(lo, hi, unit) => {
                 let v = match self.slider_val {
                     Some((row, v)) if row == i => v,
                     _ => cur.as_i64().unwrap_or(*lo),
                 };
-                self.slider(t, th, i, *lo, *hi, v, right, cy)?
+                self.slider(t, th, i, *lo, *hi, v, unit, right, cy)?
             }
-            Ctl::Kinds | Ctl::Shows => self.chips(t, th, s, i, right, y, h)?,
+            Ctl::Kinds | Ctl::Shows | Ctl::DateParts => self.chips(t, th, s, i, right, y, h)?,
             Ctl::City => self.city_ctl(t, th, right, cy)?,
             Ctl::Pictures => {
                 self.seg(t, th, i, &ROTATE, &s.rotate, right, cy)?;
@@ -854,8 +880,13 @@ impl Ui {
         };
         if let Ctl::Font(c) = r.ctl {
             self.text(t, r.title, &Fam::Ui, rc(l, y + 10.0, tw, y + 30.0), 14.0, 400, th.ink, 0)?;
-            if let Some(f) = self.font(c, &plain(&cur)) {
-                let size = if c == 'a' { 19.0 } else { 15.5 };
+            let name = if c == 'c' && plain(&cur).is_empty() { s.font_en.clone() } else { plain(&cur) };
+            if let Some(f) = self.font(c, &name) {
+                let size = match c {
+                    'a' => 19.0,
+                    'c' => 24.0,
+                    _ => 15.5,
+                };
                 self.text(t, sample(c), &Fam::Font(&f), rc(l, y + 32.0, tw, y + 70.0), size, 400, th.ink2, 0)?;
             }
         } else if hint.is_empty() {
@@ -922,8 +953,8 @@ impl Ui {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn slider(&self, t: &ID2D1RenderTarget, th: &Theme, row: usize, lo: i64, hi: i64, v: i64, right: f32, cy: f32) -> Result<f32> {
-        self.text(t, &format!("{v}%"), &Fam::Ui, rc(right - 44.0, cy - 10.0, right, cy + 10.0), 12.5, 400, th.ink2, 2)?;
+    fn slider(&self, t: &ID2D1RenderTarget, th: &Theme, row: usize, lo: i64, hi: i64, v: i64, unit: &str, right: f32, cy: f32) -> Result<f32> {
+        self.text(t, &format!("{v}{unit}"), &Fam::Ui, rc(right - 44.0, cy - 10.0, right, cy + 10.0), 12.5, 400, th.ink2, 2)?;
         let (l, r) = (right - 264.0, right - 56.0);
         rr(t, rc(l, cy - 2.0, r, cy + 2.0), 2.0, Some(alpha(th.track, 0.45)), None)?;
         let f = ((v - lo) as f32 / (hi - lo).max(1) as f32).clamp(0.0, 1.0);
@@ -948,6 +979,7 @@ impl Ui {
             for &(k, w) in ln {
                 let on = match self.rows[row].ctl {
                     Ctl::Kinds => s.has(KINDS[k].0),
+                    Ctl::DateParts => value(s, DATEPARTS[k].0).as_bool().unwrap_or(false),
                     _ => value(s, SHOWS[k].0).as_bool().unwrap_or(false),
                 };
                 let r = rc(x, yy, x + w, yy + 28.0);
@@ -995,7 +1027,7 @@ impl Ui {
         if !s.custom_photo.is_empty() {
             let stale = self.custom_thumb.borrow().as_ref().map(|(p, _)| p != &s.custom_photo).unwrap_or(true);
             if stale {
-                let bmp = crate::render::load_photo(&crate::render::Photo::File(s.custom_photo.clone()), 192, 108, "none", false, false).ok().map(|x| x.0);
+                let bmp = crate::render::load_photo(&crate::render::Photo::File(s.custom_photo.clone()), 192, 108, "none", false, false, 0).ok().map(|x| x.0);
                 *self.custom_thumb.borrow_mut() = Some((s.custom_photo.clone(), bmp));
             }
         }
@@ -1162,6 +1194,9 @@ impl Ui {
         let cur = plain(&value(s, self.rows[row].key));
         match &self.rows[row].ctl {
             Ctl::Drop(o) => o.iter().map(|(v, l)| (l.clone(), *v == cur, None)).collect(),
+            Ctl::Font('c') => std::iter::once(("Same as the English font".to_string(), cur.is_empty(), None))
+                .chain(fonts_of('c').iter().map(|f| (f.name.to_string(), f.name == cur, Some('c'))))
+                .collect(),
             Ctl::Font(c) => fonts_of(*c).iter().map(|f| (f.name.to_string(), f.name == cur, Some(*c))).collect(),
             _ => vec![],
         }
@@ -1554,7 +1589,7 @@ fn drag_to(a: Act, r: R, x: f32, y: f32) {
         let Some(u) = b.as_mut() else { return };
         match a {
             Act::Slider(row) => {
-                if let Ctl::Slider(lo, hi) = u.rows[row].ctl {
+                if let Ctl::Slider(lo, hi, _) = u.rows[row].ctl {
                     u.slider_val = Some((row, lo + ((hi - lo) as f32 * fx).round() as i64));
                 }
             }
@@ -1674,6 +1709,8 @@ fn act(a: Act, r: R, x: f32, y: f32) {
                     let v = UI.with(|u| {
                         u.borrow().as_ref().and_then(|u| match &u.rows[row].ctl {
                             Ctl::Drop(o) => o.get(k).map(|o| o.0.clone()),
+                            Ctl::Font('c') if k == 0 => Some(String::new()),
+                            Ctl::Font('c') => fonts_of('c').get(k - 1).map(|f| f.name.to_string()),
                             Ctl::Font(c) => fonts_of(*c).get(k).map(|f| f.name.to_string()),
                             _ => None,
                         })
@@ -1712,7 +1749,8 @@ fn act(a: Act, r: R, x: f32, y: f32) {
                     n.kinds.push(key);
                 }
             } else {
-                let key = SHOWS[k].0;
+                let dateparts = UI.with(|u| u.borrow().as_ref().map(|u| matches!(u.rows[row].ctl, Ctl::DateParts))).unwrap_or(false);
+                let key = if dateparts { DATEPARTS[k].0 } else { SHOWS[k].0 };
                 n = with(&n, key, Value::Bool(!value(&n, key).as_bool().unwrap_or(false)));
             }
             apply(n);
@@ -1943,7 +1981,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             // Small pictures for the Picture section, decoded once the window is showing.
             let thumbs: Vec<IWICBitmap> = crate::assets::SCENES
                 .iter()
-                .filter_map(|s| crate::render::load_photo(&crate::render::Photo::Embedded(s.jpg), 192, 108, "none", false, false).ok().map(|x| x.0))
+                .filter_map(|s| crate::render::load_photo(&crate::render::Photo::Embedded(s.jpg), 192, 108, "none", false, false, 0).ok().map(|x| x.0))
                 .collect();
             UI.with(|u| {
                 if let Some(u) = u.borrow_mut().as_mut() {

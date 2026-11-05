@@ -46,6 +46,10 @@ pub struct Frame {
     pub light: Light,
     pub zoom: f32,
     pub monitor: Option<(Sample, [Vec<f32>; 5], [String; 5])>,
+    pub fasting: Option<String>,
+    pub event: Option<String>,
+    /// Qibla bearing in degrees and its label.
+    pub qibla: Option<(f32, String)>,
 }
 
 /// How it looks (from settings).
@@ -68,6 +72,17 @@ pub struct Style {
     pub together: bool,
     pub times_style: String,
     pub monitor_style: String,
+    pub clock_scale: f32,
+    pub progress_style: String,
+    pub caps: bool,
+    pub tone: [f32; 3],
+    /// 0 none, 1 soft, 2 strong.
+    pub shadow: u8,
+    pub ar_right: bool,
+    pub col_w: f32,
+    pub glass_light: bool,
+    pub corner_r: f32,
+    pub dividers: bool,
 }
 
 /// A built-in font as a DirectWrite collection, and its family name as DirectWrite sees it
@@ -116,7 +131,7 @@ struct Fonts {
     ar: (IDWriteFontCollection1, HSTRING),
     en: (IDWriteFontCollection1, HSTRING),
     bn: (IDWriteFontCollection1, HSTRING),
-    serif: (IDWriteFontCollection1, HSTRING),
+    clock: (IDWriteFontCollection1, HSTRING),
 }
 
 pub struct Renderer {
@@ -170,7 +185,8 @@ fn bounds(ps: &[&Piece], pad: f32) -> Option<D2D_RECT_F> {
 
 impl Renderer {
     /// `photos`: one source per monitor with that monitor's size.
-    pub fn new(photos: &[(Photo, u32, u32)], effect: &str, grain: bool, glass: bool, font_ar: &str, font_bn: &str, font_en: &str) -> Result<Self> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(photos: &[(Photo, u32, u32)], effect: &str, grain: bool, glass: bool, glass_blur: u32, font_ar: &str, font_bn: &str, font_en: &str, font_clock: &str) -> Result<Self> {
         unsafe {
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dwrite: IDWriteFactory5 = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED)?;
@@ -182,7 +198,7 @@ impl Renderer {
                 ar: load(pick(crate::assets::ARABIC_FONTS, font_ar))?,
                 bn: load(pick(crate::assets::BANGLA_FONTS, font_bn))?,
                 en: load(pick(crate::assets::ENGLISH_FONTS, font_en))?,
-                serif: load(pick(crate::assets::ENGLISH_FONTS, "Playfair Display"))?,
+                clock: load(pick(crate::assets::ENGLISH_FONTS, font_clock))?,
             };
 
             let mut keys: Vec<(Photo, u32, u32)> = vec![];
@@ -200,7 +216,7 @@ impl Renderer {
             let mut decoded = vec![];
             let mut blurred = vec![];
             for (src, w, h) in &keys {
-                let (photo, soft) = load_photo(src, *w, *h, effect, grain, glass)?;
+                let (photo, soft) = load_photo(src, *w, *h, effect, grain, glass, glass_blur)?;
                 decoded.push(photo);
                 if let Some(s) = soft {
                     blurred.push(s);
@@ -224,7 +240,7 @@ impl Renderer {
         let (coll, name) = match which {
             'a' => &self.fonts.ar,
             'b' => &self.fonts.bn,
-            's' => &self.fonts.serif,
+            's' | 'c' => &self.fonts.clock,
             _ => &self.fonts.en,
         };
         unsafe {
@@ -364,9 +380,10 @@ impl Renderer {
         let (x0, y0) = (m.left as f32, m.top as f32);
         let (w, h) = ((m.right - m.left) as f32, (m.bottom - m.top) as f32);
         let u = w.min(h * 16.0 / 9.0) / 100.0 * st.scale;
-        let white = rgba(0.97, 0.95, 0.92, 1.0);
-        let soft = rgba(0.97, 0.95, 0.92, 0.76);
-        let faint = rgba(0.97, 0.95, 0.92, 0.55);
+        let [tr, tg, tb] = st.tone;
+        let white = rgba(tr, tg, tb, 1.0);
+        let soft = rgba(tr, tg, tb, 0.76);
+        let faint = rgba(tr, tg, tb, 0.55);
         let acc = rgba(st.accent[0], st.accent[1], st.accent[2], 1.0);
         let label = if st.rtl_labels { 'a' } else if st.bn_labels { 'b' } else { 'e' };
         let track = if label == 'e' { 1.0 } else { 0.0 };
@@ -383,7 +400,8 @@ impl Renderer {
             }
             "bar" => (x0 + 4.0 * u, x0 + w - 4.0 * u, 0, 0.0, y0 + h - 2.4 * u, 5.0 * u),
             _ => {
-                let (l, r) = if st.side_left { (x0 + 3.2 * u, x0 + 34.2 * u) } else { (x0 + w - 34.2 * u, x0 + w - 3.2 * u) };
+                let cw = st.col_w;
+                let (l, r) = if st.side_left { (x0 + 3.2 * u, x0 + (3.2 + cw) * u) } else { (x0 + w - (3.2 + cw) * u, x0 + w - 3.2 * u) };
                 (l, r, 0, y0 + 3.2 * u, y0 + h - 3.2 * u, 8.4 * u)
             }
         };
@@ -395,23 +413,51 @@ impl Renderer {
         let (row_x, row_w) = if bar { (col_l + cw * 0.71, cw * 0.29) } else { (col_l, cw) };
 
         // ---- clock group ----
-        let (clock_font, clock_weight) = match st.clock_style.as_str() {
-            "bold" => ('e', DWRITE_FONT_WEIGHT_SEMI_BOLD),
-            "serif" => ('s', DWRITE_FONT_WEIGHT_NORMAL),
-            _ => ('e', DWRITE_FONT_WEIGHT_EXTRA_LIGHT),
+        let clock_font = 'c';
+        let clock_weight = match st.clock_style.as_str() {
+            "bold" => DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            "light" => DWRITE_FONT_WEIGHT_LIGHT,
+            "serif" => DWRITE_FONT_WEIGHT_NORMAL,
+            _ => DWRITE_FONT_WEIGHT_EXTRA_LIGHT,
         };
+        let clock_size = clock_size * st.clock_scale;
+        let caps = |t: &str| if st.caps { t.to_uppercase() } else { t.to_string() };
         let mut clock_text = f.clock.clone();
         if let Some(s) = &f.seconds {
             clock_text.push_str(s);
         }
         let has_next = st.show_next && !f.next.is_empty();
         let mut tops = vec![
-            (self.piece(&f.meta.to_uppercase(), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track, faint)?, 0.2 * u),
+            (self.piece(&caps(&f.meta), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track * if st.caps { 1.0 } else { 0.0 }, faint)?, 0.2 * u),
             (self.one_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white)?, -0.4 * u),
         ];
+        // Extra lines under the countdown: fasting times, the next event and the Qibla.
+        let small = if corner || bar { 0.85 * u } else { 0.95 * u };
+        let mut extra: Vec<(Piece, bool)> = vec![]; // (piece, is the qibla line)
+        if let Some(t) = &f.fasting {
+            extra.push((self.piece(t, &self.format(label, small * 1.05, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w, align, 0.0, acc)?, false));
+        }
+        if let Some(t) = &f.event {
+            extra.push((self.piece(t, &self.format(label, small, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w, align, 0.0, soft)?, false));
+        }
+        if let Some((_, t)) = &f.qibla {
+            // room on the left for the little compass
+            let indent = if align == 0 { 1.5 * u } else { 0.0 };
+            let mut p = self.piece(t, &self.format(label, small, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w - indent, align, 0.0, soft)?;
+            p.w += indent;
+            extra.push((p, true));
+        }
+        let next_idx = tops.len();
         if has_next {
             let size = if corner || bar { 1.15 * u } else { 1.35 * u };
-            tops.push((self.piece(&f.next, &self.format(label, size, DWRITE_FONT_WEIGHT_LIGHT, st.rtl_labels)?, clock_w, align, 0.0, white)?, 0.0));
+            let below = if extra.is_empty() { 0.0 } else if matches!(st.progress_style.as_str(), "line" | "dots") { 1.3 * u } else { 0.5 * u };
+            tops.push((self.piece(&f.next, &self.format(label, size, DWRITE_FONT_WEIGHT_LIGHT, st.rtl_labels)?, clock_w, align, 0.0, white)?, below));
+        }
+        let first_extra = tops.len();
+        let qibla_idx = extra.iter().position(|(_, q)| *q).map(|i| first_extra + i);
+        let n_extra = extra.len();
+        for (k, (p, _)) in extra.into_iter().enumerate() {
+            tops.push((p, if k + 1 < n_extra { 0.25 * u } else { 0.0 }));
         }
         let ampm = self.piece(&f.ampm, &self.format(label, clock_size * 0.17, DWRITE_FONT_WEIGHT_LIGHT, false)?, 8.0 * u, 0, 0.0, soft)?;
 
@@ -441,7 +487,7 @@ impl Renderer {
         // ---- reminder group ----
         // If the column is too short for everything, squeeze the reminder step by step: smaller
         // Arabic and meaning, then no special-day line, then no meaning. Nothing may overlap.
-        let gaps = 3.0 * u + if row_h > 0.0 { 1.6 * u } else { 0.0 } + if strip_h > 0.0 { 1.4 * u } else { 0.0 };
+        let gaps = if st.behind == "glass" { 4.8 * u } else { 3.0 * u } + if row_h > 0.0 { 1.6 * u } else { 0.0 } + if strip_h > 0.0 { 1.4 * u } else { 0.0 };
         let clock_h: f32 = tops.iter().map(|(p, g)| p.h + g).sum();
         let budget = if corner || bar { f32::MAX } else { (bottom - top) - clock_h - row_h - strip_h - gaps };
         let mut rems: Vec<(Piece, f32)> = vec![]; // (piece, gap below)
@@ -455,10 +501,10 @@ impl Renderer {
                 }
             }
             if st.show_reminder && !f.kind.is_empty() {
-                rems.push((self.piece(&f.kind.to_uppercase(), &self.format(label, 0.8 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, rem_w, align, 0.1 * u * track, acc)?, 0.45 * u));
+                rems.push((self.piece(&caps(&f.kind), &self.format(label, 0.8 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, rem_w, align, 0.1 * u * track * if st.caps { 1.0 } else { 0.0 }, acc)?, 0.45 * u));
                 if !f.arabic.is_empty() {
                     let max = if bar { 5.2 * u } else { 7.5 * u } * shrink;
-                    rems.push((self.fitted(&f.arabic, 'a', 2.3 * u * st.ar_scale, DWRITE_FONT_WEIGHT_NORMAL, true, rem_w, max, align, white)?, 0.45 * u));
+                    rems.push((self.fitted(&f.arabic, 'a', 2.3 * u * st.ar_scale, DWRITE_FONT_WEIGHT_NORMAL, true, rem_w, max, if st.ar_right { 2 } else { align }, white)?, 0.45 * u));
                 }
                 if !f.meaning.is_empty() && level < 3 {
                     let which = if f.meaning_bn { 'b' } else { 'e' };
@@ -494,8 +540,15 @@ impl Renderer {
         let mut rem_top = placed.last().map(|p| p.y).unwrap_or(rem_bottom);
 
         let span: f32 = tops.iter().map(|(p, g)| p.h + g).sum();
+        // Space between the clock group and the reminder. Glass cards add 1.6u padding around each
+        // group, so they need more room or the two cards touch.
+        let group_gap = match (st.behind.as_str(), corner) {
+            ("glass", _) => 3.2 * u + 1.6 * u,
+            (_, true) => 2.0 * u,
+            _ => 3.0 * u,
+        };
         let mut cy = if corner {
-            rem_top - 2.0 * u - span
+            rem_top - group_gap - span
         } else if bar {
             rem_bottom - span
         } else {
@@ -503,7 +556,7 @@ impl Renderer {
         };
         // Together: close the gap between the clock and the rest, and centre the whole block.
         if st.together && !corner && !bar {
-            let gap = 3.0 * u;
+            let gap = group_gap;
             let block = span + gap + (bottom - rem_top);
             let free = (bottom - top) - block;
             if free > 0.0 {
@@ -518,8 +571,12 @@ impl Renderer {
             }
         }
         let mut clock_pieces: Vec<Piece> = vec![];
-        for (mut p, gap) in tops {
+        for (k, (mut p, gap)) in tops.into_iter().enumerate() {
             p.x = clock_x;
+            if Some(k) == qibla_idx && align == 0 {
+                p.x += 1.5 * u;
+                p.w -= 1.5 * u;
+            }
             p.y = cy;
             cy += p.h + gap;
             clock_pieces.push(p);
@@ -556,15 +613,22 @@ impl Renderer {
                         None => None,
                     };
                     for b in boxes {
-                        let rr = D2D1_ROUNDED_RECT { rect: b, radiusX: 1.4 * u, radiusY: 1.4 * u };
+                        let rr = D2D1_ROUNDED_RECT { rect: b, radiusX: st.corner_r * u, radiusY: st.corner_r * u };
                         if let Some(bmp) = &soft_bmp {
                             let brush = t.CreateBitmapBrush(bmp, None, None)?;
                             let sz = bmp.GetPixelSize();
                             brush.SetTransform(&(Matrix3x2::scale(w / sz.width.max(1) as f32, h / sz.height.max(1) as f32) * Matrix3x2::translation(x0, y0)));
                             t.FillRoundedRectangle(&rr, &brush);
                         }
-                        t.FillRoundedRectangle(&rr, &t.CreateSolidColorBrush(&rgba(0.03, 0.04, 0.07, 0.2 + 0.45 * a), None)?);
-                        t.DrawRoundedRectangle(&rr, &t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.14), None)?, 1.0, None);
+                        // Light glass is a frosted white veil, still with enough shade under it for
+                        // white text to stay readable on bright pictures.
+                        if st.glass_light {
+                            t.FillRoundedRectangle(&rr, &t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.12), None)?);
+                            t.FillRoundedRectangle(&rr, &t.CreateSolidColorBrush(&rgba(0.10, 0.10, 0.12, 0.22 + 0.3 * a), None)?);
+                        } else {
+                            t.FillRoundedRectangle(&rr, &t.CreateSolidColorBrush(&rgba(0.03, 0.04, 0.07, 0.2 + 0.45 * a), None)?);
+                        }
+                        t.DrawRoundedRectangle(&rr, &t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, if st.glass_light { 0.26 } else { 0.14 }), None)?, 1.0, None);
                     }
                 }
                 "none" => {}
@@ -614,12 +678,16 @@ impl Renderer {
         }
 
         // ---- text ----
-        let shadow = st.behind == "none";
+        let shadow = st.shadow;
         let draw = |p: &Piece| -> Result<()> {
             unsafe {
-                if shadow {
-                    let s = t.CreateSolidColorBrush(&rgba(0.0, 0.0, 0.0, 0.6 * p.color.a), None)?;
-                    t.DrawTextLayout(Vector2 { X: p.x + 0.1 * u, Y: p.y + 0.12 * u }, &p.layout, &s, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                if shadow > 0 {
+                    let s = t.CreateSolidColorBrush(&rgba(0.0, 0.0, 0.0, if shadow > 1 { 0.9 } else { 0.6 } * p.color.a), None)?;
+                    t.DrawTextLayout(Vector2 { X: p.x + 0.08 * u, Y: p.y + 0.1 * u }, &p.layout, &s, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                    if shadow > 1 {
+                        let wide = t.CreateSolidColorBrush(&rgba(0.0, 0.0, 0.0, 0.35 * p.color.a), None)?;
+                        t.DrawTextLayout(Vector2 { X: p.x + 0.16 * u, Y: p.y + 0.2 * u }, &p.layout, &wide, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                    }
                 }
                 t.DrawTextLayout(Vector2 { X: p.x, Y: p.y }, &p.layout, &t.CreateSolidColorBrush(&p.color, None)?, D2D1_DRAW_TEXT_OPTIONS_NONE);
             }
@@ -642,9 +710,10 @@ impl Renderer {
             }
             self.clock_rect.borrow_mut().insert(mi, RECT { left: (dl - u) as i32, top: c.y as i32, right: (dr + 7.0 * u) as i32, bottom: (c.y + c.h) as i32 });
         }
-        if has_next {
+        if has_next && st.progress_style != "off" {
             // progress from the last prayer to the next one
-            let n = clock_pieces.last().unwrap();
+            let n = &clock_pieces[next_idx];
+            let frac = f.progress.clamp(0.0, 1.0);
             let ly = n.y + n.h + 0.55 * u;
             let len = if centre { cw * 0.3 } else { clock_w.min(16.0 * u) };
             let lx = match align {
@@ -653,8 +722,63 @@ impl Renderer {
                 _ => clock_x,
             };
             unsafe {
-                t.FillRectangle(&rect(lx, ly, lx + len, ly + 0.14 * u), &t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.18), None)?);
-                t.FillRectangle(&rect(lx, ly, lx + len * f.progress.clamp(0.0, 1.0), ly + 0.14 * u), &t.CreateSolidColorBrush(&acc, None)?);
+                let track = t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.18), None)?;
+                let fill = t.CreateSolidColorBrush(&acc, None)?;
+                match st.progress_style.as_str() {
+                    "dots" => {
+                        let count = 8;
+                        let step = len / count as f32;
+                        let lit = (frac * count as f32).round() as usize;
+                        for k in 0..count {
+                            let e = D2D1_ELLIPSE { point: Vector2 { X: lx + step * (k as f32 + 0.5), Y: ly + 0.1 * u }, radiusX: 0.22 * u, radiusY: 0.22 * u };
+                            t.FillEllipse(&e, if k < lit { &fill } else { &track });
+                        }
+                    }
+                    "ring" => {
+                        // a small ring just after the countdown text
+                        let mut m = DWRITE_TEXT_METRICS::default();
+                        n.layout.GetMetrics(&mut m)?;
+                        let r = 0.55 * u;
+                        let (cx, cy) = (n.x + m.left + m.width + 1.2 * u, n.y + n.h / 2.0);
+                        t.DrawEllipse(&D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: r, radiusY: r }, &track, 0.2 * u, None);
+                        let v = frac.clamp(0.005, 0.999);
+                        let a0 = -std::f32::consts::FRAC_PI_2;
+                        let a1 = a0 + v * std::f32::consts::TAU;
+                        let geo = self.factory.CreatePathGeometry()?;
+                        let sink = geo.Open()?;
+                        sink.BeginFigure(Vector2 { X: cx + r * a0.cos(), Y: cy + r * a0.sin() }, D2D1_FIGURE_BEGIN_HOLLOW);
+                        sink.AddArc(&D2D1_ARC_SEGMENT {
+                            point: Vector2 { X: cx + r * a1.cos(), Y: cy + r * a1.sin() },
+                            size: D2D_SIZE_F { width: r, height: r },
+                            rotationAngle: 0.0,
+                            sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                            arcSize: if v > 0.5 { D2D1_ARC_SIZE_LARGE } else { D2D1_ARC_SIZE_SMALL },
+                        });
+                        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                        sink.Close()?;
+                        t.DrawGeometry(&geo, &fill, 0.2 * u, None);
+                    }
+                    _ => {
+                        t.FillRectangle(&rect(lx, ly, lx + len, ly + 0.14 * u), &track);
+                        t.FillRectangle(&rect(lx, ly, lx + len * frac, ly + 0.14 * u), &fill);
+                    }
+                }
+            }
+        }
+        if let (Some(qi), Some((deg, _))) = (qibla_idx, &f.qibla) {
+            // a little compass whose needle points to the Qibla (north is up)
+            let p = &clock_pieces[qi];
+            unsafe {
+                let mut m = DWRITE_TEXT_METRICS::default();
+                p.layout.GetMetrics(&mut m)?;
+                let r = 0.5 * u;
+                let (cx, cy) = (p.x + m.left - 0.85 * u, p.y + p.h / 2.0);
+                let ring = t.CreateSolidColorBrush(&rgba(1.0, 1.0, 1.0, 0.45), None)?;
+                t.DrawEllipse(&D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: r, radiusY: r }, &ring, 0.09 * u, None);
+                let a = deg.to_radians();
+                let tip = Vector2 { X: cx + 0.85 * r * a.sin(), Y: cy - 0.85 * r * a.cos() };
+                t.DrawLine(Vector2 { X: cx, Y: cy }, tip, &t.CreateSolidColorBrush(&acc, None)?, 0.12 * u, None);
+                t.FillEllipse(&D2D1_ELLIPSE { point: tip, radiusX: 0.1 * u, radiusY: 0.1 * u }, &t.CreateSolidColorBrush(&acc, None)?);
             }
         }
         for p in &placed {
@@ -712,7 +836,7 @@ impl Renderer {
                         b.x = row_x;
                         b.y = y + (lh - b.h) / 2.0;
                         draw(&b)?;
-                        if k + 1 < n {
+                        if k + 1 < n && st.dividers {
                             fill(rect(row_x, y + lh - 0.5, row_x + row_w, y + lh), rgba(1.0, 1.0, 1.0, 0.07), 0.0)?;
                         }
                     }
@@ -746,7 +870,9 @@ impl Renderer {
                 }
                 _ => {
                     let colw = row_w / n as f32;
-                    fill(rect(row_x, row_y, row_x + row_w, row_y + 1.0), rgba(1.0, 1.0, 1.0, 0.16), 0.0)?;
+                    if st.dividers {
+                        fill(rect(row_x, row_y, row_x + row_w, row_y + 1.0), rgba(1.0, 1.0, 1.0, 0.16), 0.0)?;
+                    }
                     for (slot, &i) in order.iter().enumerate() {
                         let (name, time, now) = &f.times[i];
                         let x = row_x + slot as f32 * colw;
@@ -926,7 +1052,9 @@ impl Drop for Renderer {
 
 /// Decodes `src`, scales it to cover `w`×`h` (cropping the middle) and applies the picture
 /// effect. Also returns, for the glass card, a soft blurred copy at a third of the size.
-pub(crate) fn load_photo(src: &Photo, w: u32, h: u32, effect: &str, grain: bool, glass: bool) -> Result<(IWICBitmap, Option<IWICBitmap>)> {
+/// `glass_blur` 0..30: how soft the glass card's background is (0 = clear glass).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn load_photo(src: &Photo, w: u32, h: u32, effect: &str, grain: bool, glass: bool, glass_blur: u32) -> Result<(IWICBitmap, Option<IWICBitmap>)> {
     unsafe {
         let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
         let dec = match src {
@@ -1005,7 +1133,7 @@ pub(crate) fn load_photo(src: &Photo, w: u32, h: u32, effect: &str, grain: bool,
                 }
             }
         }
-        let soft = if glass { Some(blur(&photo, 14, w / 3, h / 3)?) } else { None };
+        let soft = if glass && glass_blur > 0 { Some(blur(&photo, 4 + glass_blur.min(30), w / 3, h / 3)?) } else { None };
         Ok((photo, soft))
     }
 }
