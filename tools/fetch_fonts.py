@@ -15,12 +15,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent / "assets" / "fonts"
 UA = {"User-Agent": "miqaat-wallpaper-builder/1.0"}
 
 # (fontsource id, subset, weights wanted). Missing weights are skipped; DirectWrite picks the nearest.
+ARABIC = ['noto-naskh-arabic', 'scheherazade-new', 'lateef', 'amiri', 'amiri-quran', 'markazi-text', 'harmattan', 'noto-sans-arabic', 'ibm-plex-sans-arabic', 'tajawal', 'almarai', 'readex-pro', 'cairo', 'changa', 'el-messiri', 'mada', 'vazirmatn', 'alexandria', 'rubik', 'baloo-bhaijaan-2', 'noto-kufi-arabic', 'reem-kufi', 'kufam', 'aref-ruqaa', 'lalezar', 'rakkas', 'katibeh', 'marhey']
+BANGLA = ['noto-sans-bengali', 'hind-siliguri', 'anek-bangla', 'noto-serif-bengali', 'tiro-bangla', 'baloo-da-2', 'mina', 'atma', 'galada']
+ENGLISH = ['geist', 'manrope', 'plus-jakarta-sans', 'inter', 'outfit', 'sora', 'dm-sans', 'urbanist', 'figtree', 'onest', 'lexend', 'jost', 'montserrat', 'poppins', 'raleway', 'nunito', 'quicksand', 'work-sans', 'space-grotesk', 'ibm-plex-sans', 'josefin-sans', 'rubik', 'fraunces', 'playfair-display', 'lora', 'cormorant-garamond', 'eb-garamond', 'libre-baskerville', 'dm-serif-display', 'cinzel', 'bebas-neue', 'jetbrains-mono']
 FONTS = [
-    *[(f, "arabic", [400]) for f in ["noto-naskh-arabic", "scheherazade-new", "lateef", "amiri", "ibm-plex-sans-arabic",
-                                     "tajawal", "almarai", "readex-pro", "cairo", "noto-kufi-arabic", "reem-kufi"]],
-    *[(f, "bengali", [300, 400]) for f in ["noto-sans-bengali", "hind-siliguri", "tiro-bangla", "baloo-da-2"]],
-    *[(f, "latin", [200, 300, 400, 600]) for f in ["geist", "manrope", "plus-jakarta-sans", "inter", "outfit", "sora",
-                                                   "dm-sans", "urbanist", "fraunces", "playfair-display", "lora", "jetbrains-mono"]],
+    *[(f, "arabic", [400]) for f in ARABIC],
+    *[(f, "bengali", [300, 400]) for f in BANGLA],
+    *[(f, "latin", [200, 300, 400, 600]) for f in ENGLISH],
 ]
 
 
@@ -32,9 +33,19 @@ def fetch(url: str) -> bytes:
 def main():
     ROOT.mkdir(parents=True, exist_ok=True)
     total = 0
+    families = {}
     for fid, subset, weights in FONTS:
-        meta = json.loads(fetch(f"https://api.fontsource.org/v1/fonts/{fid}"))
-        assert meta["license"].startswith("OFL"), fid
+        try:
+            meta = json.loads(fetch(f"https://api.fontsource.org/v1/fonts/{fid}"))
+        except Exception:
+            print(f"!! {fid}: not on Fontsource, skipped")
+            continue
+        lic = meta.get("license", "")
+        lic = lic.get("type", "") if isinstance(lic, dict) else lic
+        if not lic.startswith("OFL"):
+            print(f"!! {fid}: licence {lic!r}, skipped")
+            continue
+        families[fid] = meta.get("family", fid)
         seen = set()
         for wt in weights:
             v = meta["variants"].get(str(wt), {}).get("normal", {}).get(subset)
@@ -50,6 +61,7 @@ def main():
             out.write_bytes(data)
             total += out.stat().st_size
             print(f"{out.name:40} {out.stat().st_size // 1024:5} KB")
+    (ROOT / "families.json").write_text(json.dumps(families, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"total {total // 1024} KB")
 
 

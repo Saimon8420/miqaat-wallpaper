@@ -18,13 +18,10 @@ NAMES = {
     "sora": "Sora", "dm-sans": "DM Sans", "urbanist": "Urbanist", "fraunces": "Fraunces", "playfair-display": "Playfair Display",
     "lora": "Lora", "jetbrains-mono": "JetBrains Mono",
 }
-GROUPS = {
-    "ARABIC": ["noto-naskh-arabic", "scheherazade-new", "lateef", "amiri", "ibm-plex-sans-arabic", "tajawal", "almarai",
-               "readex-pro", "cairo", "noto-kufi-arabic", "reem-kufi"],
-    "BANGLA": ["noto-sans-bengali", "hind-siliguri", "tiro-bangla", "baloo-da-2"],
-    "ENGLISH": ["geist", "manrope", "plus-jakarta-sans", "inter", "outfit", "sora", "dm-sans", "urbanist", "fraunces",
-                "playfair-display", "lora", "jetbrains-mono"],
-}
+from fetch_fonts import ARABIC, BANGLA, ENGLISH
+
+GROUPS = {"ARABIC": ARABIC, "BANGLA": BANGLA, "ENGLISH": ENGLISH}
+FAMILIES = json.loads((ROOT / "assets/fonts/families.json").read_text(encoding="utf-8")) if (ROOT / "assets/fonts/families.json").exists() else {}
 
 
 def rs(s: str) -> str:
@@ -75,7 +72,9 @@ def main():
     for group, ids in GROUPS.items():
         out += ["", f"pub static {group}_FONTS: &[Font] = &["]
         for i in ids:
-            out.append(f"    font!({rs(NAMES[i])}, {', '.join(rs(f) for f in files[i])}),")
+            if i not in files:
+                continue
+            out.append(f"    font!({rs(NAMES.get(i) or FAMILIES.get(i, i))}, {', '.join(rs(f) for f in files[i])}),")
         out.append("];")
     out += [
         "",
