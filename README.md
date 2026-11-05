@@ -25,6 +25,8 @@ The **[live demo](https://saimon8420.github.io/miqaat-wallpaper/)** is an intera
 - **Reminders follow the time of day:** morning adhkar after Fajr, adhkar after each salah, evening adhkar after Asr, the iftar dua in Ramadan, and duas before sleep.
 - **Special days**, shown only where the evidence is clear: White Days, Mondays and Thursdays, Ashura, the Day of Arafah, the first ten days of Dhu al-Hijjah, the last ten nights of Ramadan, Eid, Shawwal and Fridays. Fasting days get a heads-up the evening before.
 - **20 pictures** (Kaaba, Madinah, Al-Aqsa, Córdoba, Hagia Sophia, Shat Gumbad, Star Mosque and more), or your own photo. Keep one, or get a new one every day or at each prayer.
+- **13 calligraphy scenes** drawn by the app: an illuminated page, a night over an Ottoman mosque, dunes at dawn, lanterns, ink and seal, zellige, an oasis, a moonlit sea and more, each with a phrase in bold Kufi lettering and its meaning.
+- **Ramadan and Eid scenes** that appear by themselves: Ramadan nights, Laylat al-Qadr in the last ten nights, Eid al-Fitr, the Day of Arafah and Eid al-Adha. Then your own picture comes back.
 - **The light follows the sky.** The picture turns rose at Fajr, gold at sunrise and orange at Maghrib, and darkens at night. You choose how dark.
 - **Design options:** four layouts (column, centre, corner and bottom bar), a separate clock font, weight and size, three countdown styles, a line, dots or ring for the time left, a date line you choose (weekday, Hijri date, date, city), text colour and shadow, column width, a soft shade or a frosted glass card (dark or light, adjustable blur and corners), four prayer-time styles, five system-monitor styles, five accent colours or any colour you pick, a slow camera drift, film grain and picture effects.
 - **69 fonts:** 28 Arabic, 9 Bangla and 32 English. The wallpaper can be in English, বাংলা or العربية.
@@ -74,9 +76,9 @@ Days whose special worship is disputed are deliberately left out.
 
 ## How it works
 
-- **Rust + Win32**, with no web view and no runtime. One 36 MB exe holds the photos (up to 4K), fonts and content.
+- **Rust + Win32**, with no web view and no runtime. One 37 MB exe holds the photos (up to 4K), the calligraphy scenes, fonts and content.
 - **Behind the icons.** The wallpaper window is a child of Explorer's desktop `WorkerW`. On Windows 11 24H2 and later, that window sits inside `Progman` and the desktop has no GDI surface, so the wallpaper is a layered child window.
-- **Drawn in software** with Direct2D and DirectWrite on the CPU. A GPU render target would load the graphics driver into the process (about 100 MB). Each photo is decoded once at the monitor's size.
+- **Drawn in software** with Direct2D and DirectWrite on the CPU. A GPU render target would load the graphics driver into the process (about 100 MB). Each photo is decoded once at the monitor's size. Calligraphy scenes are SVG, drawn once by [resvg](https://github.com/linebender/resvg) when the picture changes; their source is `tools/calligraphy/scenes.js`.
 - **Small repaints.** The text panel redraws once a minute and the whole picture only when the light changes. With those options on, only the clock redraws each second and only the system strip every 2 seconds. Nothing redraws while a full-screen game or video is running.
 - **Privacy.** The only network requests are to the Miqaat API (prayer times, about once a month) and to Open-Meteo when you search for a city. There's no telemetry.
 

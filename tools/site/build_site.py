@@ -5,6 +5,7 @@
 import io
 import json
 import pathlib
+import subprocess
 
 from PIL import Image
 
@@ -41,7 +42,7 @@ ed('<span class="eyebrow">Proposal · Desktop</span>', '<span class="eyebrow">Fr
 ed("<h1>Miqaat Live Wallpaper.<br>", "<h1>Miqaat Wallpaper.<br>")
 ed('Written in Rust to use almost no memory.</p>',
    'Written in Rust; about 30 MB of memory.</p>\n'
-   f'  <div class="cta"><a class="dl" href="{DL}">Download for Windows<span>MiqaatWallpaper-Setup.exe · 36 MB</span></a>'
+   f'  <div class="cta"><a class="dl" href="{DL}">Download for Windows<span>MiqaatWallpaper-Setup.exe · 37 MB</span></a>'
    f'<a class="gh" href="{GH}">Source on GitHub</a><a class="gh" href="#install">How to install</a></div>')
 ed("The settings above are live in this preview: city, method, Asr time and Hijri date fetch real times from the Miqaat API.",
    "This page is a live preview of the app: city, method, Asr time and Hijri date fetch real times from the Miqaat API. The real wallpaper draws the same thing natively, behind your desktop icons.")
@@ -59,6 +60,41 @@ ed("<li><b>Duas, dhikr, istighfar, durood and what to do on each day:</b> our ow
 ed("<li>All of it is packed into one small offline file (about 3–5 MB), so nothing needs the internet</li>",
    "<li>All of it is one 1 MB file built into the app, so reminders never need the internet</li>")
 
+
+# Calligraphy gallery: real renders from the app itself (needs a release build in target/release).
+GALLERY = [("illuminated-page", "Illuminated page"), ("night-over-the-mosque", "Night over the mosque"), ("lanterns", "Lanterns"),
+           ("tone-on-tone-allah", "Tone on tone"), ("ramadan-night", "Ramadan night"), ("eid-morning", "Eid morning"),
+           ("day-of-arafah", "Day of Arafah"), ("eid-prayer-at-the-eidgah", "Eid al-Adha"), ("takbir-of-eid", "Takbir of Eid")]
+EXE = REPO / "target/release/MiqaatWallpaper.exe"
+(DOCS / "calligraphy").mkdir(parents=True, exist_ok=True)
+for sid, _ in GALLERY:
+    png = DOCS / f"calligraphy/{sid}.png"
+    if EXE.exists():
+        subprocess.run([str(EXE), "--snapshot", str(png), "--size", "1600x900", "--at", "13:12", "--set", f"scene=cal:{sid}",
+                        "--set", "rotate=keep", "--set", "seconds=false", "--set", "show_monitor=false", "--set", "lang=en",
+                        "--set", "layout=column", "--set", "side=right"], check=True)
+        Image.open(png).convert("RGB").resize((960, 540), Image.LANCZOS).save(DOCS / f"calligraphy/{sid}.jpg", "JPEG", quality=80, optimize=True, progressive=True)
+        png.unlink()
+gallery = "".join(f'<figure><img src="calligraphy/{sid}.jpg" alt="{name}" loading="lazy"><figcaption>{name}</figcaption></figure>' for sid, name in GALLERY)
+
+ed("""        <li>Turn it off and the wallpaper goes back to updating once a minute</li></ul></div></div>
+    </div>""", """        <li>Turn it off and the wallpaper goes back to updating once a minute</li></ul></div></div>
+      <div class="cell b6"><div class="core"><span class="tag">Calligraphy</span><h3>13 scenes drawn by the app</h3><ul>
+        <li>An illuminated page, a night over an Ottoman mosque, dunes at dawn, lanterns, ink and seal, zellige, an oasis, a moonlit sea and more</li>
+        <li>Each with a phrase in bold Kufi lettering, its meaning and its source</li>
+        <li>Vector art, sharp on any screen; drawn once when the picture changes, no extra memory</li></ul></div></div>
+      <div class="cell b6"><div class="core"><span class="tag">Ramadan &amp; Eid</span><h3>The right picture on the right day</h3><ul>
+        <li>Ramadan nights all month, Laylat al-Qadr in the last ten nights</li>
+        <li>Eid al-Fitr, the Day of Arafah and Eid al-Adha, by the Hijri date</li>
+        <li>Then your own picture comes back by itself</li></ul></div></div>
+      <div class="cell b8"><div class="core"><span class="tag">On the wallpaper</span><h3>A little more, when you want it</h3><ul>
+        <li>Suhoor and iftar times, with a countdown to iftar while you fast</li>
+        <li>The Qibla direction for your city, and the days left until Ramadan and the two Eids</li>
+        <li>A quiet notification a few minutes before each prayer, and before Jumu'ah</li>
+        <li>69 fonts in Arabic, Bangla and English, and 18 ways to style the clock, date, text and cards</li></ul></div></div>
+      <div class="cell b4"><div class="core"><span class="tag">Updates</span><h3>Checks once a day</h3><p style="margin-top:12px">A small helper asks GitHub for a new version and closes again. You choose when to install, from the tray menu.</p></div></div>
+    </div>""")
+
 # Plan + decisions -> install section
 start = s.index('  <section>\n    <span class="eyebrow">Plan</span>')
 end = s.index("</section>", start) + len("</section>")
@@ -66,7 +102,7 @@ install = f'''  <section id="install">
     <span class="eyebrow">Install</span>
     <h2>One download.<br>No admin, no account.</h2>
     <div class="steps">
-      <div><span>01</span><p><b>Download</b> <a href="{DL}">MiqaatWallpaper-Setup.exe</a> (about 36 MB) from the latest release.</p></div>
+      <div><span>01</span><p><b>Download</b> <a href="{DL}">MiqaatWallpaper-Setup.exe</a> (about 37 MB) from the latest release.</p></div>
       <div><span>02</span><p><b>Run it.</b> Windows may show "Windows protected your PC" because the app is new and not code-signed: click <i>More info</i>, then <i>Run anyway</i>.</p></div>
       <div><span>03</span><p><b>Choose Yes</b> to install for your account only. It copies itself to your user folder, adds a Start menu entry and starts with Windows. Choose <i>No</i> to just try it once.</p></div>
       <div><span>04</span><p><b>Set your city.</b> Settings open on first run; later, right-click the moon icon near the clock. Changes show on the wallpaper straight away.</p></div>
@@ -74,7 +110,13 @@ install = f'''  <section id="install">
     </div>
     <div class="ask"><div><h3>Free and open source</h3><p>MIT licensed. Photos are from Wikimedia Commons under their own licences, fonts under the SIL Open Font Licence; every credit is in the repository.</p></div><a class="dl" href="{DL}">Download<span>Windows 10 &amp; 11</span></a></div>
   </section>'''
-s = s[:start] + install + s[end:]
+gallery_section = f'''  <section id="calligraphy">
+    <span class="eyebrow">Calligraphy</span>
+    <h2>Scenes the app draws itself.</h2>
+    <div class="gal">{gallery}</div>
+  </section>
+'''
+s = s[:start] + gallery_section + install + s[end:]
 
 ed("</style>", """.cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:28px}
 .dl{display:inline-flex;flex-direction:column;gap:2px;padding:14px 26px;border-radius:99px;background:var(--ink);color:#fff;text-decoration:none;font-weight:500;font-size:15px;transition:transform .5s var(--ease)}
@@ -84,6 +126,10 @@ ed("</style>", """.cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center;m
 .gh:hover{background:rgba(22,20,15,.09)}
 .steps a{color:var(--pri)}
 .ask{display:flex;gap:24px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;margin-top:30px}
+.gal figure{margin:0;padding:6px;border-radius:20px;background:rgba(22,20,15,.035);box-shadow:inset 0 0 0 1px rgba(22,20,15,.05)}
+.gal img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:14px}
+.gal figcaption{font-size:13.5px;color:var(--ink2);padding:8px 6px 2px}
 </style>""")
 
 (DOCS / "index.html").write_text(s, encoding="utf-8")
