@@ -75,6 +75,17 @@ for sid, _ in GALLERY:
                         "--set", "layout=column", "--set", "side=right"], check=True)
         Image.open(png).convert("RGB").resize((960, 540), Image.LANCZOS).save(DOCS / f"calligraphy/{sid}.jpg", "JPEG", quality=80, optimize=True, progressive=True)
         png.unlink()
+# Clock designs, rendered the same way.
+CLOCKS = [("classic", "Classic"), ("split", "Bold hours"), ("stack", "Stacked"), ("tiles", "Tiles"), ("pill", "Pill"), ("dial", "Dial")]
+for cid, _ in CLOCKS:
+    png = DOCS / f"calligraphy/clock-{cid}.png"
+    if EXE.exists():
+        subprocess.run([str(EXE), "--snapshot", str(png), "--size", "1600x900", "--at", "13:12:07", "--set", "scene=wadirum",
+                        "--set", "rotate=keep", "--set", "seconds=true", "--set", "show_monitor=false", "--set", "lang=en",
+                        "--set", "layout=column", "--set", "side=left", "--set", f"clock_design={cid}", "--set", "info_style=cards"], check=True)
+        Image.open(png).convert("RGB").crop((0, 0, 800, 450)).resize((640, 360), Image.LANCZOS).save(DOCS / f"calligraphy/clock-{cid}.jpg", "JPEG", quality=82, optimize=True, progressive=True)
+        png.unlink()
+clocks = "".join(f'<figure><img src="calligraphy/clock-{cid}.jpg" alt="{name} clock" loading="lazy"><figcaption>{name}</figcaption></figure>' for cid, name in CLOCKS)
 gallery = "".join(f'<figure><img src="calligraphy/{sid}.jpg" alt="{name}" loading="lazy"><figcaption>{name}</figcaption></figure>' for sid, name in GALLERY)
 
 ed("""        <li>Turn it off and the wallpaper goes back to updating once a minute</li></ul></div></div>
@@ -92,6 +103,14 @@ ed("""        <li>Turn it off and the wallpaper goes back to updating once a min
         <li>The Qibla direction for your city, and the days left until Ramadan and the two Eids</li>
         <li>A quiet notification a few minutes before each prayer, and before Jumu'ah</li>
         <li>69 fonts in Arabic, Bangla and English, and 18 ways to style the clock, date, text and cards</li></ul></div></div>
+      <div class="cell b6"><div class="core"><span class="tag">Clock</span><h3>Six designs, or none</h3><ul>
+        <li>Classic, bold hours, stacked, flip tiles, a pill with a seconds ring, or an analog dial</li>
+        <li>Turn the clock off and the next prayer becomes the headline</li>
+        <li>With seconds on, only the seconds change; nothing else moves</li></ul></div></div>
+      <div class="cell b6"><div class="core"><span class="tag">At a glance</span><h3>Fasting, next event and Qibla</h3><ul>
+        <li>As lines, chips, small cards or one ruled strip</li>
+        <li>The iftar card shows how much of the fast is done</li>
+        <li>Uses the empty space beside the countdown</li></ul></div></div>
       <div class="cell b4"><div class="core"><span class="tag">Updates</span><h3>Checks once a day</h3><p style="margin-top:12px">A small helper asks GitHub for a new version and closes again. You choose when to install, from the tray menu.</p></div></div>
     </div>""")
 
@@ -114,6 +133,11 @@ gallery_section = f'''  <section id="calligraphy">
     <span class="eyebrow">Calligraphy</span>
     <h2>Scenes the app draws itself.</h2>
     <div class="gal">{gallery}</div>
+  </section>
+  <section id="clocks">
+    <span class="eyebrow">Clock</span>
+    <h2>Six clocks, or none at all.</h2>
+    <div class="gal">{clocks}</div>
   </section>
 '''
 s = s[:start] + gallery_section + install + s[end:]
