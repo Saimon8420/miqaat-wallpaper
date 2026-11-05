@@ -311,6 +311,32 @@ fn check_update_child() {
     }
 }
 
+/// Removes what an update leaves behind: the downloaded installer in %TEMP% and the saved
+/// "new version" note once this copy is that version or newer. The installer may still be
+/// closing when this runs, so deleting it is retried for a little while on a short thread.
+fn clean_after_update() {
+    let note = settings::data_dir().join("update.json");
+    let stale = std::fs::read_to_string(&note)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|j| j.get("version")?.as_str().map(|v| !extras::newer(v, install::VERSION)))
+        .unwrap_or(true);
+    if stale {
+        let _ = std::fs::remove_file(&note);
+    }
+    let setup = std::env::temp_dir().join("MiqaatWallpaper-Setup.exe");
+    if setup.exists() {
+        std::thread::spawn(move || {
+            for _ in 0..30 {
+                if std::fs::remove_file(&setup).is_ok() || !setup.exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        });
+    }
+}
+
 /// Downloads the new version and runs it; it closes this copy, replaces it and starts again.
 fn run_update(url: String) {
     std::thread::spawn(move || {
@@ -847,6 +873,9 @@ fn main() -> windows::core::Result<()> {
             tray::notify(ctl, &format!("Miqaat Wallpaper {}", install::VERSION), "Updated. Your settings were kept.");
         } else if let Some(i) = args.iter().position(|a| a == "--settings") {
             settings_ui::open_at(args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(0));
+        }
+        if install::is_installed_copy() {
+            clean_after_update();
         }
 
         let mut msg = MSG::default();
