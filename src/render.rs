@@ -274,16 +274,35 @@ impl Renderer {
         }
     }
 
-    /// Text on one line that never wraps: the font shrinks (down to half) until it fits `width`.
+    /// The clock on one line that never wraps (the font shrinks to fit, down to half). The size is chosen from the widest possible time (every
+    /// digit an 8 or a 0, whichever is wider) and digits use equal-width figures, so the clock,
+    /// am/pm and the lines around it stay still while the seconds tick.
     #[allow(clippy::too_many_arguments)]
-    fn one_line(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, width: f32, align: u8, color: D2D1_COLOR_F) -> Result<Piece> {
+    fn clock_line(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, width: f32, align: u8, color: D2D1_COLOR_F) -> Result<(Piece, f32)> {
+        let tnum = |p: &Piece, n: usize| -> Result<()> {
+            unsafe {
+                let ty = self.dwrite.CreateTypography()?;
+                ty.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, parameter: 1 })?;
+                p.layout.SetTypography(&ty, DWRITE_TEXT_RANGE { startPosition: 0, length: n as u32 })?;
+            }
+            Ok(())
+        };
+        let swap = |d: char| text.chars().map(|c| if c.is_numeric() { d } else { c }).collect::<String>();
+        let n = text.encode_utf16().count();
         let mut s = size;
         loop {
             let f = self.format(which, s, weight, false)?;
             unsafe { f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)? };
-            let p = self.piece(text, &f, width, align, 0.0, color)?;
-            if self.width(&p)? <= width || s <= size * 0.5 {
-                return Ok(p);
+            let mut widest = 0.0f32;
+            for d in ['0', '8'] {
+                let p = self.piece(&swap(d), &f, width, align, 0.0, color)?;
+                tnum(&p, n)?;
+                widest = widest.max(self.width(&p)?);
+            }
+            if widest <= width || s <= size * 0.5 {
+                let p = self.piece(text, &f, width, align, 0.0, color)?;
+                tnum(&p, n)?;
+                return Ok((p, widest));
             }
             s *= 0.95;
         }
@@ -427,9 +446,11 @@ impl Renderer {
             clock_text.push_str(s);
         }
         let has_next = st.show_next && !f.next.is_empty();
+        // Arabic-Indic digits have no tabular feature in every font; the fixed size still holds.
+        let (clock_piece, clock_full_w) = self.clock_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white)?;
         let mut tops = vec![
             (self.piece(&caps(&f.meta), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track * if st.caps { 1.0 } else { 0.0 }, faint)?, 0.2 * u),
-            (self.one_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white)?, -0.4 * u),
+            (clock_piece, -0.4 * u),
         ];
         // Extra lines under the countdown: fasting times, the next event and the Qibla.
         let small = if corner || bar { 0.85 * u } else { 0.95 * u };
@@ -701,7 +722,13 @@ impl Renderer {
             let c = &clock_pieces[1];
             let mut cm = DWRITE_TEXT_METRICS::default();
             c.layout.GetMetrics(&mut cm)?;
-            let (dl, dr) = (c.x + cm.left, c.x + cm.left + cm.width);
+            // Use the widest possible time, not this second's, so am/pm never shifts.
+            let dl = match align {
+                1 => c.x + (c.w - clock_full_w) / 2.0,
+                2 => c.x + c.w - clock_full_w,
+                _ => c.x + cm.left,
+            };
+            let dr = dl + clock_full_w.max(cm.width);
             if !f.ampm.is_empty() {
                 let mut ap = ampm;
                 ap.x = dr + 0.6 * u;

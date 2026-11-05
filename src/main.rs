@@ -755,7 +755,11 @@ fn snapshot(args: &[String], out: &str) -> windows::core::Result<()> {
         a.sysmon = Some(m);
     }
     // `--at 17:30`: show another hour of today (clock, light, next prayer, reminder).
-    a.fake_now = arg_after(args, "--at").and_then(|v| v.split_once(':')).and_then(|(h, m)| Some(h.parse::<u32>().ok()? * 3600 + m.parse::<u32>().ok()? * 60));
+    // --at HH:MM or HH:MM:SS
+    a.fake_now = arg_after(args, "--at").and_then(|v| {
+        let p: Vec<u32> = v.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+        Some(p.first()? * 3600 + p.get(1)? * 60 + p.get(2).copied().unwrap_or(0))
+    });
     a.rotate_reminder(true);
     a.ensure_renderer();
     let f = a.frame();
