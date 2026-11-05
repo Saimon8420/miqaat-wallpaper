@@ -41,7 +41,7 @@ ed('<span class="eyebrow">Proposal · Desktop</span>', '<span class="eyebrow">Fr
 ed("<h1>Miqaat Live Wallpaper.<br>", "<h1>Miqaat Wallpaper.<br>")
 ed('Written in Rust to use almost no memory.</p>',
    'Written in Rust; about 30 MB of memory.</p>\n'
-   f'  <div class="cta"><a class="dl" href="{DL}">Download for Windows<span>MiqaatWallpaper-Setup.exe · 30 MB</span></a>'
+   f'  <div class="cta"><a class="dl" href="{DL}">Download for Windows<span>MiqaatWallpaper-Setup.exe · 36 MB</span></a>'
    f'<a class="gh" href="{GH}">Source on GitHub</a><a class="gh" href="#install">How to install</a></div>')
 ed("The settings above are live in this preview: city, method, Asr time and Hijri date fetch real times from the Miqaat API.",
    "This page is a live preview of the app: city, method, Asr time and Hijri date fetch real times from the Miqaat API. The real wallpaper draws the same thing natively, behind your desktop icons.")
@@ -66,7 +66,7 @@ install = f'''  <section id="install">
     <span class="eyebrow">Install</span>
     <h2>One download.<br>No admin, no account.</h2>
     <div class="steps">
-      <div><span>01</span><p><b>Download</b> <a href="{DL}">MiqaatWallpaper-Setup.exe</a> (about 30 MB) from the latest release.</p></div>
+      <div><span>01</span><p><b>Download</b> <a href="{DL}">MiqaatWallpaper-Setup.exe</a> (about 36 MB) from the latest release.</p></div>
       <div><span>02</span><p><b>Run it.</b> Windows may show "Windows protected your PC" because the app is new and not code-signed: click <i>More info</i>, then <i>Run anyway</i>.</p></div>
       <div><span>03</span><p><b>Choose Yes</b> to install for your account only. It copies itself to your user folder, adds a Start menu entry and starts with Windows. Choose <i>No</i> to just try it once.</p></div>
       <div><span>04</span><p><b>Set your city.</b> Settings open on first run; later, right-click the moon icon near the clock. Changes show on the wallpaper straight away.</p></div>

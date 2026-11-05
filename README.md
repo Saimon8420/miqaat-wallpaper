@@ -26,8 +26,11 @@ The **[live demo](https://saimon8420.github.io/miqaat-wallpaper/)** is an intera
 - **Special days**, shown only where the evidence is clear: White Days, Mondays and Thursdays, Ashura, the Day of Arafah, the first ten days of Dhu al-Hijjah, the last ten nights of Ramadan, Eid, Shawwal and Fridays. Fasting days get a heads-up the evening before.
 - **20 pictures** (Kaaba, Madinah, Al-Aqsa, Córdoba, Hagia Sophia, Shat Gumbad, Star Mosque and more), or your own photo. Keep one, or get a new one every day or at each prayer.
 - **The light follows the sky.** The picture turns rose at Fajr, gold at sunrise and orange at Maghrib, and darkens at night. You choose how dark.
-- **Design options:** four layouts (column, centre, corner and bottom bar), three clock styles, Arabic digits, seconds, five accent colours, a soft shade or a frosted glass card, a slow camera drift, film grain and picture effects.
-- **27 fonts:** 11 Arabic, 4 Bangla and 12 English. The wallpaper can be in English, বাংলা or العربية.
+- **Design options:** four layouts (column, centre, corner and bottom bar), a separate clock font, weight and size, three countdown styles, a line, dots or ring for the time left, a date line you choose (weekday, Hijri date, date, city), text colour and shadow, column width, a soft shade or a frosted glass card (dark or light, adjustable blur and corners), four prayer-time styles, five system-monitor styles, five accent colours or any colour you pick, a slow camera drift, film grain and picture effects.
+- **69 fonts:** 28 Arabic, 9 Bangla and 32 English. The wallpaper can be in English, বাংলা or العربية.
+- **Fasting, Qibla and events:** suhoor and iftar countdowns on Ramadan and sunnah fasting days, a small Qibla compass for your city, and how many days until Ramadan or the next Eid.
+- **Reminders before prayer** (5–30 minutes, your choice) and a Jumu'ah reminder on Fridays, as quiet Windows notifications.
+- **Updates itself:** checks GitHub once a day and offers the new version in the tray menu; it installs only when you click.
 - **An optional system monitor** shows CPU, memory, GPU, disk and network with small history lines.
 - **Light on your PC.** It pauses during games and full-screen video and saves power on battery. It works on several monitors and starts with Windows.
 
@@ -35,7 +38,7 @@ The **[live demo](https://saimon8420.github.io/miqaat-wallpaper/)** is an intera
 
 ## Install
 
-1. **Download** [`MiqaatWallpaper-Setup.exe`](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe) (about 30 MB) from the [latest release](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest).
+1. **Download** [`MiqaatWallpaper-Setup.exe`](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe) (about 36 MB) from the [latest release](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest).
 2. **Run it.** Windows may say *"Windows protected your PC"* because the app is new and not code-signed. Click **More info**, then **Run anyway**.
 3. **Choose Yes** to install for your account only. No admin rights are needed. It copies itself to `%LOCALAPPDATA%\Programs\Miqaat Wallpaper`, adds a Start menu entry and starts with Windows. Choose **No** to just try it once without installing.
 4. **Set your city.** The settings window opens on the first run. After that, right-click the moon icon near the clock in the taskbar and choose **Settings…**. Every change shows on the wallpaper straight away.
@@ -71,7 +74,7 @@ Days whose special worship is disputed are deliberately left out.
 
 ## How it works
 
-- **Rust + Win32**, with no web view and no runtime. One 30 MB exe holds the photos (up to 4K), fonts and content.
+- **Rust + Win32**, with no web view and no runtime. One 36 MB exe holds the photos (up to 4K), fonts and content.
 - **Behind the icons.** The wallpaper window is a child of Explorer's desktop `WorkerW`. On Windows 11 24H2 and later, that window sits inside `Progman` and the desktop has no GDI surface, so the wallpaper is a layered child window.
 - **Drawn in software** with Direct2D and DirectWrite on the CPU. A GPU render target would load the graphics driver into the process (about 100 MB). Each photo is decoded once at the monitor's size.
 - **Small repaints.** The text panel redraws once a minute and the whole picture only when the light changes. With those options on, only the clock redraws each second and only the system strip every 2 seconds. Nothing redraws while a full-screen game or video is running.
