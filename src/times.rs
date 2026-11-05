@@ -16,6 +16,9 @@ pub struct Day {
     pub hijri: String,
     /// Fajr, Sunrise, Dhuhr, Asr, Maghrib, Isha as minutes after the city's midnight.
     pub minutes: [u32; 6],
+    /// End of suhoor and iftar (months saved by older versions don't have them).
+    #[serde(default)]
+    pub fast: Option<[u32; 2]>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -39,6 +42,14 @@ struct RespDay {
     date: String,
     hijri: String,
     prayers: Prayers,
+    #[serde(default)]
+    fasting: Option<Fasting>,
+}
+#[derive(Deserialize)]
+struct Fasting {
+    #[serde(rename = "suhoorEnd")]
+    suhoor_end: Time,
+    iftar: Time,
 }
 #[derive(Deserialize)]
 struct Prayers {
@@ -105,6 +116,7 @@ pub fn fetch(lat: f64, lng: f64, method: &str, madhab: &str, year: i32, month: u
             Day {
                 minutes: [p.fajr.iso.as_str(), &p.sunrise.iso, &p.dhuhr.iso, &p.asr.iso, &p.maghrib.iso, &p.isha.iso].map(minutes),
                 hijri: d.hijri.trim_end_matches(" AH").to_string(),
+                fast: d.fasting.as_ref().map(|f| [minutes(&f.suhoor_end.iso), minutes(&f.iftar.iso)]),
                 date: d.date,
             }
         })
