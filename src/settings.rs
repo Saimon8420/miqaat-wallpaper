@@ -112,6 +112,11 @@ pub struct Settings {
     pub auto_update: bool,
     // 1.2.0: calligraphy scenes by themselves in Ramadan, on Eid and on Arafah
     pub occasions: bool,
+    pub show_clock: bool,
+    /// classic, split (bold hours), stack, tiles, pill or dial
+    pub clock_design: String,
+    /// How fasting, the next event and Qibla are shown: lines, chips, cards or strip
+    pub info_style: String,
 }
 
 impl Default for Settings {
@@ -193,6 +198,9 @@ impl Default for Settings {
             jumuah: true,
             auto_update: true,
             occasions: true,
+            show_clock: true,
+            clock_design: "classic".into(),
+            info_style: "cards".into(),
         }
     }
 }

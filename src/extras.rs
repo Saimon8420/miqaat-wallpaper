@@ -122,6 +122,60 @@ pub fn jumuah(l: Lang, mins: u32) -> (String, String) {
     }
 }
 
+/// One value for the info cards, chips and strip: what it is, the value, and a short note.
+/// `kind` 0 fasting, 1 the next event, 2 Qibla. `progress` 0..1 fills a small bar.
+pub struct Tile {
+    pub kind: u8,
+    pub label: String,
+    pub value: String,
+    pub sub: String,
+    pub accent: bool,
+    pub progress: Option<f32>,
+}
+
+/// The fasting tile: time left to iftar or to the end of suhoor, or tomorrow's suhoor.
+pub fn fasting_tile(l: Lang, kind: &str, mins: Option<u32>, at: &str, progress: Option<f32>) -> Tile {
+    let (label, value, sub) = match (kind, mins) {
+        ("iftar", Some(m)) => (["Iftar", "ইফতার", "الإفطار"], duration(l, m), [format!("at {at}"), format!("{at}-এ"), format!("الساعة {at}")]),
+        ("suhoor", Some(m)) => (["Suhoor ends", "সাহরি শেষ", "ينتهي السحور"], duration(l, m), [format!("at {at}"), format!("{at}-এ"), format!("الساعة {at}")]),
+        _ => (["Suhoor tomorrow", "আগামীকাল সাহরি", "سحور الغد"], at.to_string(), ["ends".to_string(), "শেষ সময়".to_string(), "ينتهي".to_string()]),
+    };
+    let i = l as usize;
+    Tile { kind: 0, label: label[i].to_string(), value, sub: sub[i].clone(), accent: true, progress: if kind == "iftar" { progress } else { None } }
+}
+
+/// The next of Ramadan and the two Eids as a tile: "Ramadan · 96 · days to go".
+pub fn event_tile(l: Lang, days_until: [i64; 3]) -> Option<Tile> {
+    let names = match l {
+        Lang::En => ["Ramadan", "Eid al-Fitr", "Eid al-Adha"],
+        Lang::Bn => ["রমজান", "ঈদুল ফিতর", "ঈদুল আযহা"],
+        Lang::Ar => ["رمضان", "عيد الفطر", "عيد الأضحى"],
+    };
+    let (i, d) = days_until.iter().enumerate().filter(|(_, d)| **d > 0).min_by_key(|(_, d)| **d)?;
+    let sub = match (l, *d) {
+        (Lang::En, 1) => "tomorrow",
+        (Lang::En, _) => "days to go",
+        (Lang::Bn, 1) => "আগামীকাল",
+        (Lang::Bn, _) => "দিন বাকি",
+        (Lang::Ar, 1) => "غدًا",
+        (Lang::Ar, _) => "يومًا متبقيًا",
+    };
+    Some(Tile { kind: 1, label: names[i].to_string(), value: digits(l, false, &d.to_string()), sub: sub.into(), accent: false, progress: None })
+}
+
+pub fn qibla_tile(l: Lang, deg: f64) -> Tile {
+    const EN: [&str; 8] = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+    const BN: [&str; 8] = ["উত্তর", "উত্তর-পূর্ব", "পূর্ব", "দক্ষিণ-পূর্ব", "দক্ষিণ", "দক্ষিণ-পশ্চিম", "পশ্চিম", "উত্তর-পশ্চিম"];
+    const AR: [&str; 8] = ["الشمال", "الشمال الشرقي", "الشرق", "الجنوب الشرقي", "الجنوب", "الجنوب الغربي", "الغرب", "الشمال الغربي"];
+    let k = (((deg + 22.5) % 360.0) / 45.0) as usize;
+    let (label, sub) = match l {
+        Lang::En => ("Qibla", EN[k]),
+        Lang::Bn => ("কিবলা", BN[k]),
+        Lang::Ar => ("القبلة", AR[k]),
+    };
+    Tile { kind: 2, label: label.into(), value: digits(l, false, &format!("{:.0}°", deg)), sub: sub.into(), accent: false, progress: None }
+}
+
 /// "1.1.10" > "1.1.9".
 pub fn newer(remote: &str, local: &str) -> bool {
     let parse = |v: &str| v.trim_start_matches('v').split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();

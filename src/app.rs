@@ -326,6 +326,9 @@ impl App {
                 _ => 1.4,
             },
             dividers: self.s.dividers,
+            show_clock: self.s.show_clock,
+            clock_design: self.s.clock_design.clone(),
+            info_style: self.s.info_style.clone(),
         };
         // A calligraphy scene brings its own panel colours; on a light one the text is dark and
         // nothing dark goes behind it.
@@ -440,6 +443,16 @@ impl App {
         }
 
         let fasting = if self.s.show_fasting { self.fasting_line(days, now) } else { None };
+        let mut tiles = vec![];
+        if self.s.show_fasting {
+            tiles.extend(self.fasting_tile(days, now));
+        }
+        if self.s.show_event {
+            tiles.extend(self.events.and_then(|(d, e)| (d <= days && days - d < 30).then(|| e.map(|x| x - (days - d)))).and_then(|e| crate::extras::event_tile(l, e)));
+        }
+        if self.s.show_qibla {
+            tiles.push(crate::extras::qibla_tile(l, crate::extras::qibla(self.s.lat, self.s.lng)));
+        }
         let event = if self.s.show_event { self.events.and_then(|(d, e)| (d <= days && days - d < 30).then(|| e.map(|x| x - (days - d)))).and_then(|e| crate::extras::event(l, e)) } else { None };
         let qibla = self.s.show_qibla.then(|| {
             let deg = crate::extras::qibla(self.s.lat, self.s.lng);
@@ -488,6 +501,8 @@ impl App {
             fasting,
             event,
             qibla,
+            tiles,
+            time: [sec / 3600 % 24, sec / 60 % 60, sec % 60],
         }
     }
 
@@ -496,6 +511,30 @@ impl App {
         self.hijri(days)
             .map(|h| h.month == 9 || hijri::special(h, times::weekday(days), self.lang()).map(|s| s.heads_up).unwrap_or(false))
             .unwrap_or(false)
+    }
+
+    /// The same as `fasting_line`, as a tile; while fasting it carries how much of the fast is done.
+    fn fasting_tile(&self, days: i64, now: u32) -> Option<crate::extras::Tile> {
+        let l = self.lang();
+        let d = self.day(days)?;
+        let [suhoor, iftar] = d.fast.unwrap_or([d.minutes[0].saturating_sub(10), d.minutes[4]]);
+        let at = |m: u32| {
+            let (t, ap) = self.fmt_time(m);
+            if ap.is_empty() { t } else { format!("{t} {ap}") }
+        };
+        if self.fasting_day(days) && now < iftar {
+            return Some(if now < suhoor {
+                crate::extras::fasting_tile(l, "suhoor", Some(suhoor - now), &at(suhoor), None)
+            } else {
+                let done = (now - suhoor) as f32 / (iftar - suhoor).max(1) as f32;
+                crate::extras::fasting_tile(l, "iftar", Some(iftar - now), &at(iftar), Some(done))
+            });
+        }
+        if now >= d.minutes[4] && self.fasting_day(days + 1) {
+            let next = self.day(days + 1).and_then(|n| n.fast.map(|f| f[0]).or(Some(n.minutes[0].saturating_sub(10)))).unwrap_or(suhoor);
+            return Some(crate::extras::fasting_tile(l, "tomorrow", None, &at(next), None));
+        }
+        None
     }
 
     /// Suhoor and iftar countdowns on fasting days, and a heads-up the evening before one.

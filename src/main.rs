@@ -201,7 +201,7 @@ fn arm_timers() {
         } else if !a.s.show_monitor {
             a.sysmon = None;
         }
-        (a.s.seconds, a.s.show_monitor, a.s.monitor_every.clamp(1, 60))
+        (a.s.seconds && a.s.show_clock, a.s.show_monitor, a.s.monitor_every.clamp(1, 60))
     })
     .unwrap_or((false, false, 2));
     let h = ctl();

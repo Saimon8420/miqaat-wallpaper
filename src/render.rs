@@ -52,6 +52,10 @@ pub struct Frame {
     pub event: Option<String>,
     /// Qibla bearing in degrees and its label.
     pub qibla: Option<(f32, String)>,
+    /// Fasting, next event and Qibla as values, for the chips, cards and strip styles.
+    pub tiles: Vec<crate::extras::Tile>,
+    /// Local hours, minutes and seconds, for the dial and the seconds ring.
+    pub time: [u32; 3],
 }
 
 /// How it looks (from settings).
@@ -85,6 +89,11 @@ pub struct Style {
     pub glass_light: bool,
     pub corner_r: f32,
     pub dividers: bool,
+    pub show_clock: bool,
+    /// classic, split, stack, tiles, pill or dial
+    pub clock_design: String,
+    /// lines, chips, cards or strip
+    pub info_style: String,
 }
 
 /// A built-in font as a DirectWrite collection, and its family name as DirectWrite sees it
@@ -185,6 +194,28 @@ fn bounds(ps: &[&Piece], pad: f32) -> Option<D2D_RECT_F> {
     r.map(|r| rect(r.left - pad, r.top - pad, r.right + pad, r.bottom + pad))
 }
 
+
+/// A drawing made of simple parts, laid out relative to its own top-left corner: the clock
+/// designs (stacked, tiles, pill, dial) and the info styles (chips, cards, strip).
+struct Art {
+    w: f32,
+    h: f32,
+    items: Vec<ArtItem>,
+}
+
+enum ArtItem {
+    Text(Piece),
+    Rect { r: D2D_RECT_F, radius: f32, fill: D2D1_COLOR_F, stroke: Option<D2D1_COLOR_F> },
+    Line { a: Vector2, b: Vector2, w: f32, c: D2D1_COLOR_F },
+    Circle { c: Vector2, r: f32, fill: Option<D2D1_COLOR_F>, stroke: Option<(D2D1_COLOR_F, f32)> },
+    /// An arc from angle `a0` to `a1` (radians, 0 = right, clockwise).
+    Arc { c: Vector2, r: f32, a0: f32, a1: f32, w: f32, col: D2D1_COLOR_F },
+}
+
+fn v2(x: f32, y: f32) -> Vector2 {
+    Vector2 { X: x, Y: y }
+}
+
 impl Renderer {
     /// `photos`: one source per monitor with that monitor's size.
     #[allow(clippy::too_many_arguments)]
@@ -280,12 +311,16 @@ impl Renderer {
     /// digit an 8 or a 0, whichever is wider) and digits use equal-width figures, so the clock,
     /// am/pm and the lines around it stay still while the seconds tick.
     #[allow(clippy::too_many_arguments)]
-    fn clock_line(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, width: f32, align: u8, color: D2D1_COLOR_F) -> Result<(Piece, f32)> {
+    fn clock_line(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, width: f32, align: u8, color: D2D1_COLOR_F, bold: usize) -> Result<(Piece, f32)> {
         let tnum = |p: &Piece, n: usize| -> Result<()> {
             unsafe {
                 let ty = self.dwrite.CreateTypography()?;
                 ty.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, parameter: 1 })?;
                 p.layout.SetTypography(&ty, DWRITE_TEXT_RANGE { startPosition: 0, length: n as u32 })?;
+                // "Bold hours": the first `bold` characters heavier than the rest
+                if bold > 0 {
+                    p.layout.SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE { startPosition: 0, length: bold as u32 })?;
+                }
             }
             Ok(())
         };
@@ -308,6 +343,328 @@ impl Renderer {
             }
             s *= 0.95;
         }
+    }
+
+    /// An empty piece that only keeps a place in the layout.
+    fn blank(&self, h: f32, w: f32) -> Result<Piece> {
+        let mut p = self.piece("", &self.format('e', 12.0, DWRITE_FONT_WEIGHT_NORMAL, false)?, w, 0, 0.0, rgba(0.0, 0.0, 0.0, 0.0))?;
+        p.h = h;
+        Ok(p)
+    }
+
+    /// A single line of text that does not wrap, with equal-width digits.
+    #[allow(clippy::too_many_arguments)]
+    fn label_piece(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, rtl: bool, align: u8, width: f32, color: D2D1_COLOR_F) -> Result<Piece> {
+        let fmt = self.format(which, size, weight, rtl)?;
+        unsafe { fmt.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)? };
+        let p = self.piece(text, &fmt, width.max(1.0), align, 0.0, color)?;
+        unsafe {
+            let ty = self.dwrite.CreateTypography()?;
+            ty.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, parameter: 1 })?;
+            p.layout.SetTypography(&ty, DWRITE_TEXT_RANGE { startPosition: 0, length: text.encode_utf16().count() as u32 })?;
+        }
+        Ok(p)
+    }
+
+    /// The clock drawn as stacked numbers, flip tiles, a pill or a dial. Every number that
+    /// changes sits in a box of fixed size, so nothing moves while the seconds tick.
+    #[allow(clippy::too_many_arguments)]
+    fn clock_art(&self, design: &str, hours: &str, minutes: &str, secs: Option<&str>, ampm: &str, time: [u32; 3], size: f32, weight: DWRITE_FONT_WEIGHT, width: f32, tone: [f32; 3], acc: D2D1_COLOR_F, u: f32) -> Result<Art> {
+        let [tr, tg, tb] = tone;
+        let ink = |a: f32| rgba(tr, tg, tb, a);
+        let mut items = vec![];
+        let at = |mut p: Piece, x: f32, y: f32| {
+            p.x = x;
+            p.y = y;
+            ArtItem::Text(p)
+        };
+        let (w, h) = match design {
+            "stack" => {
+                // a big hour, with minutes, seconds and am/pm stacked beside it
+                let hp = self.label_piece(hours, 'c', size * 1.25, DWRITE_FONT_WEIGHT_SEMI_BOLD, false, 0, width, ink(1.0))?;
+                let hw = self.width(&hp)?.max(size * 0.62);
+                let col = hw + 0.9 * u;
+                let mp = self.label_piece(minutes, 'c', size * 0.6, weight, false, 0, width, ink(1.0))?;
+                let mut y = hp.h * 0.12;
+                let mh = mp.h;
+                items.push(at(mp, col, y));
+                y += mh * 0.92;
+                if let Some(s) = secs {
+                    let sp = self.label_piece(s, 'c', size * 0.27, DWRITE_FONT_WEIGHT_LIGHT, false, 0, width, ink(0.6))?;
+                    let sh = sp.h;
+                    items.push(at(sp, col + 0.1 * u, y));
+                    y += sh;
+                }
+                if !ampm.is_empty() {
+                    let ap = self.label_piece(&ampm.to_uppercase(), 'e', size * 0.15, DWRITE_FONT_WEIGHT_NORMAL, false, 0, width, ink(0.7))?;
+                    items.push(at(ap, col + 0.12 * u, y + 0.1 * u));
+                }
+                let h = hp.h * 0.95;
+                items.insert(0, at(hp, 0.0, 0.0));
+                (col + size * 0.75, h)
+            }
+            "tiles" => {
+                // flip-clock tiles: hh : mm (: ss), one digit per tile
+                let hh: String = if hours.chars().count() < 2 { format!("{}{}", if hours.chars().all(|c| c.is_ascii_digit()) { '0' } else { '٠' }, hours) } else { hours.to_string() };
+                let (tw, th) = (size * 0.52, size * 0.84);
+                let gap = size * 0.07;
+                let mut x = 0.0;
+                let tile = |items: &mut Vec<ArtItem>, d: char, x: f32, scale: f32| -> Result<f32> {
+                    let (w, hgt) = (tw * scale, th * scale);
+                    let y = (th - hgt) / 2.0;
+                    items.push(ArtItem::Rect { r: rect(x, y, x + w, y + hgt), radius: 0.16 * w, fill: ink(0.09), stroke: Some(ink(0.14)) });
+                    let p = self.label_piece(&d.to_string(), 'c', size * 0.6 * scale, weight, false, 1, w, ink(if scale < 1.0 { 0.75 } else { 1.0 }))?;
+                    let ph = p.h;
+                    items.push(at(p, x, y + (hgt - ph) / 2.0));
+                    items.push(ArtItem::Line { a: v2(x, y + hgt / 2.0), b: v2(x + w, y + hgt / 2.0), w: (0.06 * u).max(1.0), c: rgba(0.0, 0.0, 0.0, 0.3) });
+                    Ok(x + w + gap)
+                };
+                let colon = |items: &mut Vec<ArtItem>, x: f32| -> f32 {
+                    for k in [0.38, 0.62] {
+                        items.push(ArtItem::Circle { c: v2(x + size * 0.09, th * k), r: size * 0.035, fill: Some(ink(0.6)), stroke: None });
+                    }
+                    x + size * 0.18 + gap
+                };
+                for d in hh.chars() {
+                    x = tile(&mut items, d, x, 1.0)?;
+                }
+                x = colon(&mut items, x);
+                for d in minutes.chars() {
+                    x = tile(&mut items, d, x, 1.0)?;
+                }
+                if let Some(s) = secs {
+                    x = colon(&mut items, x);
+                    for d in s.chars() {
+                        x = tile(&mut items, d, x, 0.66)?;
+                    }
+                }
+                if !ampm.is_empty() {
+                    let ap = self.label_piece(ampm, 'e', size * 0.17, DWRITE_FONT_WEIGHT_LIGHT, false, 0, width, ink(0.75))?;
+                    let ah = ap.h;
+                    let aw = self.width(&ap)?;
+                    items.push(at(ap, x + 0.2 * u, th * 0.7 - ah));
+                    x += 0.2 * u + aw;
+                }
+                (x, th)
+            }
+            "pill" => {
+                // the time in a rounded capsule; a small ring fills with the seconds
+                let fs = size * 0.62;
+                let (tp, tw) = self.clock_line(&format!("{hours}:{minutes}"), 'c', fs, weight, width, 0, ink(1.0), 0)?;
+                let pad = fs * 0.5;
+                let hgt = tp.h * 1.08;
+                let mut x = pad;
+                let th = tp.h;
+                items.push(at(tp, x, (hgt - th) / 2.0));
+                x += tw + fs * 0.25;
+                if secs.is_some() {
+                    let r = fs * 0.22;
+                    let c = v2(x + r, hgt / 2.0);
+                    items.push(ArtItem::Circle { c, r, fill: None, stroke: Some((ink(0.2), fs * 0.07)) });
+                    let frac = time[2] as f32 / 60.0;
+                    if frac > 0.0 {
+                        items.push(ArtItem::Arc { c, r, a0: -std::f32::consts::FRAC_PI_2, a1: -std::f32::consts::FRAC_PI_2 + frac * std::f32::consts::TAU, w: fs * 0.07, col: acc });
+                    }
+                    x += 2.0 * r + fs * 0.25;
+                }
+                if !ampm.is_empty() {
+                    let ap = self.label_piece(ampm, 'e', fs * 0.28, DWRITE_FONT_WEIGHT_LIGHT, false, 0, width, ink(0.75))?;
+                    let (ah, aw) = (ap.h, self.width(&ap)?);
+                    items.push(at(ap, x, hgt * 0.62 - ah / 2.0));
+                    x += aw;
+                }
+                let w = x + pad;
+                items.insert(0, ArtItem::Rect { r: rect(0.0, 0.0, w, hgt), radius: hgt / 2.0, fill: ink(0.08), stroke: Some(ink(0.15)) });
+                (w, hgt)
+            }
+            _ => {
+                // an analog dial
+                let r = size * 0.78;
+                let c = v2(r, r);
+                items.push(ArtItem::Circle { c, r, fill: Some(ink(0.05)), stroke: Some((ink(0.18), (0.08 * u).max(1.0))) });
+                for i in 0..60 {
+                    let a = i as f32 * 6.0_f32.to_radians();
+                    let big = i % 5 == 0;
+                    let (r0, r1) = (r * if big { 0.83 } else { 0.9 }, r * 0.95);
+                    items.push(ArtItem::Line { a: v2(c.X + a.sin() * r0, c.Y - a.cos() * r0), b: v2(c.X + a.sin() * r1, c.Y - a.cos() * r1), w: if big { r * 0.035 } else { r * 0.012 }, c: ink(if big { 0.8 } else { 0.35 }) });
+                }
+                let [hh, mm, ss] = time;
+                let hand = |deg: f32, len: f32, w: f32, col: D2D1_COLOR_F| {
+                    let a = deg.to_radians();
+                    ArtItem::Line { a: c, b: v2(c.X + a.sin() * len, c.Y - a.cos() * len), w, c: col }
+                };
+                items.push(hand(((hh % 12) as f32 + mm as f32 / 60.0) * 30.0, r * 0.5, r * 0.065, ink(1.0)));
+                items.push(hand((mm as f32 + ss as f32 / 60.0) * 6.0, r * 0.75, r * 0.042, ink(1.0)));
+                if secs.is_some() {
+                    items.push(hand(ss as f32 * 6.0, r * 0.84, r * 0.018, acc));
+                }
+                items.push(ArtItem::Circle { c, r: r * 0.05, fill: Some(acc), stroke: None });
+                (2.0 * r, 2.0 * r)
+            }
+        };
+        Ok(Art { w, h, items })
+    }
+
+    /// Fasting, the next event and the Qibla as chips, cards or a strip.
+    #[allow(clippy::too_many_arguments)]
+    fn info_art(&self, style: &str, f: &Frame, label: char, rtl: bool, width: f32, tone: [f32; 3], acc: D2D1_COLOR_F, u: f32) -> Result<Art> {
+        let [tr, tg, tb] = tone;
+        let ink = |a: f32| rgba(tr, tg, tb, a);
+        let mut items = vec![];
+        let at = |mut p: Piece, x: f32, y: f32| {
+            p.x = x;
+            p.y = y;
+            ArtItem::Text(p)
+        };
+        // a small icon for each kind, centred on (x, y) with radius r
+        let qdeg = f.qibla.as_ref().map(|q| q.0).unwrap_or(0.0);
+        let icon = |items: &mut Vec<ArtItem>, kind: u8, x: f32, y: f32, r: f32, col: D2D1_COLOR_F| match kind {
+            0 => {
+                // the sun on the horizon
+                items.push(ArtItem::Arc { c: v2(x, y + r * 0.35), r: r * 0.62, a0: std::f32::consts::PI, a1: std::f32::consts::TAU, w: r * 0.18, col });
+                items.push(ArtItem::Line { a: v2(x - r, y + r * 0.35), b: v2(x + r, y + r * 0.35), w: r * 0.18, c: col });
+            }
+            1 => {
+                // a crescent
+                items.push(ArtItem::Arc { c: v2(x, y), r: r * 0.72, a0: 0.55 * std::f32::consts::PI, a1: 1.45 * std::f32::consts::PI, w: r * 0.36, col });
+            }
+            _ => {
+                // a compass pointing to the Qibla
+                items.push(ArtItem::Circle { c: v2(x, y), r: r * 0.88, fill: None, stroke: Some((col, r * 0.14)) });
+                let a = qdeg.to_radians();
+                items.push(ArtItem::Line { a: v2(x, y), b: v2(x + a.sin() * r * 0.78, y - a.cos() * r * 0.78), w: r * 0.2, c: acc });
+            }
+        };
+        let tiles = &f.tiles;
+        let (w, h) = match style {
+            "chips" => {
+                // rounded tags in a row, wrapping when the column is narrow
+                let fs = 0.92 * u;
+                let (ch, gap, pad, ir) = (2.1 * u, 0.6 * u, 0.9 * u, 0.55 * u);
+                let (mut x, mut y, mut maxw) = (0.0f32, 0.0f32, 0.0f32);
+                for t in tiles {
+                    let text = match t.kind {
+                        0 => f.fasting.clone().unwrap_or_default(),
+                        1 => f.event.clone().unwrap_or_default(),
+                        _ => f.qibla.as_ref().map(|q| q.1.clone()).unwrap_or_default(),
+                    };
+                    let col = if t.accent { acc } else { ink(1.0) };
+                    let p = self.label_piece(&text, label, fs, DWRITE_FONT_WEIGHT_NORMAL, rtl, 0, width, col)?;
+                    let tw = self.width(&p)?;
+                    let cw = pad + 2.0 * ir + 0.5 * u + tw + pad;
+                    if x > 0.0 && x + cw > width {
+                        x = 0.0;
+                        y += ch + gap;
+                    }
+                    let (fill, stroke) = if t.accent { (rgba(acc.r, acc.g, acc.b, 0.12), rgba(acc.r, acc.g, acc.b, 0.45)) } else { (ink(0.08), ink(0.13)) };
+                    items.push(ArtItem::Rect { r: rect(x, y, x + cw, y + ch), radius: ch / 2.0, fill, stroke: Some(stroke) });
+                    icon(&mut items, t.kind, x + pad + ir, y + ch / 2.0, ir, col);
+                    let ph = p.h;
+                    items.push(at(p, x + pad + 2.0 * ir + 0.5 * u, y + (ch - ph) / 2.0));
+                    x += cw + gap;
+                    maxw = maxw.max(x - gap);
+                }
+                (maxw, y + ch)
+            }
+            "strip" => {
+                // one ruled row of values, like the prayer times
+                let n = tiles.len() as f32;
+                let cell = width / n;
+                let h = 3.6 * u;
+                items.push(ArtItem::Line { a: v2(0.0, 0.0), b: v2(width, 0.0), w: 1.0, c: ink(0.2) });
+                items.push(ArtItem::Line { a: v2(0.0, h), b: v2(width, h), w: 1.0, c: ink(0.2) });
+                for (k, t) in tiles.iter().enumerate() {
+                    let x = k as f32 * cell;
+                    if k > 0 {
+                        items.push(ArtItem::Line { a: v2(x, 0.55 * u), b: v2(x, h - 0.55 * u), w: 1.0, c: ink(0.2) });
+                    }
+                    let left = if k > 0 { x + 1.1 * u } else { x };
+                    let lp = self.label_piece(&t.label.to_uppercase(), label, 0.68 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, rtl, 0, cell, ink(0.6))?;
+                    let value = if t.kind == 1 { format!("{} {}", t.value, t.sub) } else { t.value.clone() };
+                    let vp = self.label_piece(&value, label, 1.3 * u, DWRITE_FONT_WEIGHT_LIGHT, rtl, 0, cell, if t.accent { acc } else { ink(1.0) })?;
+                    items.push(at(lp, left, 0.55 * u));
+                    items.push(at(vp, left, 1.55 * u));
+                }
+                (width, h)
+            }
+            _ => {
+                // small cards side by side; the fasting one is wider and shows how much of the fast is done
+                let gap = 0.7 * u;
+                let weights: Vec<f32> = tiles.iter().map(|t| if t.kind == 0 { 1.35 } else { 1.0 }).collect();
+                let total: f32 = weights.iter().sum();
+                let unit = (width - gap * (tiles.len() as f32 - 1.0)) / total;
+                let pad = 0.9 * u;
+                let h = 6.0 * u;
+                let mut x = 0.0;
+                for (t, wgt) in tiles.iter().zip(weights) {
+                    let cw = unit * wgt;
+                    items.push(ArtItem::Rect { r: rect(x, 0.0, x + cw, h), radius: 0.8 * u, fill: ink(0.07), stroke: Some(ink(0.13)) });
+                    icon(&mut items, t.kind, x + pad + 0.4 * u, pad + 0.45 * u, 0.42 * u, ink(0.75));
+                    let lp = self.label_piece(&t.label.to_uppercase(), label, 0.66 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, rtl, 0, cw - 2.0 * pad, ink(0.6))?;
+                    let lh = lp.h;
+                    items.push(at(lp, x + pad + 1.2 * u, pad + 0.45 * u - lh / 2.0));
+                    let vp = self.label_piece(&t.value, label, 1.55 * u, DWRITE_FONT_WEIGHT_LIGHT, rtl, 0, cw - 2.0 * pad, if t.accent { acc } else { ink(1.0) })?;
+                    items.push(at(vp, x + pad, pad + 1.15 * u));
+                    let sp = self.label_piece(&t.sub, label, 0.78 * u, DWRITE_FONT_WEIGHT_NORMAL, rtl, 0, cw - 2.0 * pad, ink(0.65))?;
+                    items.push(at(sp, x + pad, pad + 3.0 * u));
+                    if let Some(pr) = t.progress {
+                        let (bx, by, bw) = (x + pad, h - pad * 0.75, cw - 2.0 * pad);
+                        items.push(ArtItem::Rect { r: rect(bx, by, bx + bw, by + 0.2 * u), radius: 0.1 * u, fill: ink(0.15), stroke: None });
+                        items.push(ArtItem::Rect { r: rect(bx, by, bx + bw * pr.clamp(0.0, 1.0), by + 0.2 * u), radius: 0.1 * u, fill: acc, stroke: None });
+                    }
+                    x += cw + gap;
+                }
+                (width, h)
+            }
+        };
+        Ok(Art { w, h, items })
+    }
+
+    /// Draws an `Art` with its top-left corner at (ox, oy); text goes through `text` so it gets
+    /// the same shadow as the rest of the panel.
+    fn draw_art(&self, t: &ID2D1RenderTarget, a: &Art, ox: f32, oy: f32, text: &dyn Fn(&Piece) -> Result<()>) -> Result<()> {
+        let mv = |p: Vector2| v2(p.X + ox, p.Y + oy);
+        unsafe {
+            for it in &a.items {
+                match it {
+                    ArtItem::Text(p) => text(&Piece { layout: p.layout.clone(), x: p.x + ox, y: p.y + oy, w: p.w, h: p.h, color: p.color })?,
+                    ArtItem::Rect { r, radius, fill, stroke } => {
+                        let rr = D2D1_ROUNDED_RECT { rect: rect(r.left + ox, r.top + oy, r.right + ox, r.bottom + oy), radiusX: *radius, radiusY: *radius };
+                        t.FillRoundedRectangle(&rr, &t.CreateSolidColorBrush(fill, None)?);
+                        if let Some(s) = stroke {
+                            t.DrawRoundedRectangle(&rr, &t.CreateSolidColorBrush(s, None)?, 1.0, None);
+                        }
+                    }
+                    ArtItem::Line { a, b, w, c } => t.DrawLine(mv(*a), mv(*b), &t.CreateSolidColorBrush(c, None)?, *w, None),
+                    ArtItem::Circle { c, r, fill, stroke } => {
+                        let e = D2D1_ELLIPSE { point: mv(*c), radiusX: *r, radiusY: *r };
+                        if let Some(fc) = fill {
+                            t.FillEllipse(&e, &t.CreateSolidColorBrush(fc, None)?);
+                        }
+                        if let Some((sc, w)) = stroke {
+                            t.DrawEllipse(&e, &t.CreateSolidColorBrush(sc, None)?, *w, None);
+                        }
+                    }
+                    ArtItem::Arc { c, r, a0, a1, w, col } => {
+                        let c = mv(*c);
+                        let geo = self.factory.CreatePathGeometry()?;
+                        let sink = geo.Open()?;
+                        sink.BeginFigure(v2(c.X + r * a0.cos(), c.Y + r * a0.sin()), D2D1_FIGURE_BEGIN_HOLLOW);
+                        sink.AddArc(&D2D1_ARC_SEGMENT {
+                            point: v2(c.X + r * a1.cos(), c.Y + r * a1.sin()),
+                            size: D2D_SIZE_F { width: *r, height: *r },
+                            rotationAngle: 0.0,
+                            sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                            arcSize: if a1 - a0 > std::f32::consts::PI { D2D1_ARC_SIZE_LARGE } else { D2D1_ARC_SIZE_SMALL },
+                        });
+                        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                        sink.Close()?;
+                        t.DrawGeometry(&geo, &t.CreateSolidColorBrush(col, None)?, *w, None);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// How wide the laid-out text actually is.
@@ -448,22 +805,40 @@ impl Renderer {
             clock_text.push_str(s);
         }
         let has_next = st.show_next && !f.next.is_empty();
+        let design = st.clock_design.as_str();
+        let (hours, minutes) = f.clock.split_once(':').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or((f.clock.clone(), String::new()));
+        let secs = f.seconds.as_ref().map(|s| s.trim_start_matches(':').to_string());
+        let bold = if design == "split" { hours.encode_utf16().count() } else { 0 };
         // Arabic-Indic digits have no tabular feature in every font; the fixed size still holds.
-        let (clock_piece, clock_full_w) = self.clock_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white)?;
-        let mut tops = vec![
-            (self.piece(&caps(&f.meta), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track * if st.caps { 1.0 } else { 0.0 }, faint)?, 0.2 * u),
-            (clock_piece, -0.4 * u),
-        ];
+        let (clock_piece, clock_full_w) = self.clock_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white, bold)?;
+        let art = if st.show_clock && matches!(design, "stack" | "tiles" | "pill" | "dial") {
+            Some(self.clock_art(design, &hours, &minutes, secs.as_deref(), &f.ampm, f.time, clock_size, clock_weight, clock_w, [tr, tg, tb], acc, u)?)
+        } else {
+            None
+        };
+        let mut tops = vec![(self.piece(&caps(&f.meta), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track * if st.caps { 1.0 } else { 0.0 }, faint)?, 0.2 * u)];
+        let clock_idx = st.show_clock.then_some(1);
+        if st.show_clock {
+            match &art {
+                // an empty piece that only holds the drawing's place
+                Some(a) => tops.push((self.blank(a.h, clock_w)?, 0.7 * u)),
+                None => tops.push((clock_piece, -0.4 * u)),
+            }
+        }
         // Extra lines under the countdown: fasting times, the next event and the Qibla.
         let small = if corner || bar { 0.85 * u } else { 0.95 * u };
         let mut extra: Vec<(Piece, bool)> = vec![]; // (piece, is the qibla line)
-        if let Some(t) = &f.fasting {
+        let info_style = if bar || f.tiles.is_empty() { "lines" } else { st.info_style.as_str() };
+        let info = if info_style == "lines" { None } else { Some(self.info_art(info_style, f, label, st.rtl_labels, clock_w, [tr, tg, tb], acc, u)?) };
+        if let Some(a) = &info {
+            extra.push((self.blank(a.h, clock_w)?, false));
+        } else if let Some(t) = &f.fasting {
             extra.push((self.piece(t, &self.format(label, small * 1.05, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w, align, 0.0, acc)?, false));
         }
-        if let Some(t) = &f.event {
+        if let (None, Some(t)) = (&info, &f.event) {
             extra.push((self.piece(t, &self.format(label, small, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w, align, 0.0, soft)?, false));
         }
-        if let Some((_, t)) = &f.qibla {
+        if let (None, Some((_, t))) = (&info, &f.qibla) {
             // room on the left for the little compass
             let indent = if align == 0 { 1.5 * u } else { 0.0 };
             let mut p = self.piece(t, &self.format(label, small, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w - indent, align, 0.0, soft)?;
@@ -472,11 +847,12 @@ impl Renderer {
         }
         let next_idx = tops.len();
         if has_next {
-            let size = if corner || bar { 1.15 * u } else { 1.35 * u };
+            let size = if corner || bar { 1.15 * u } else { 1.35 * u } * if st.show_clock { 1.0 } else { 1.5 };
             let below = if extra.is_empty() { 0.0 } else if matches!(st.progress_style.as_str(), "line" | "dots") { 1.3 * u } else { 0.5 * u };
             tops.push((self.piece(&f.next, &self.format(label, size, DWRITE_FONT_WEIGHT_LIGHT, st.rtl_labels)?, clock_w, align, 0.0, white)?, below));
         }
         let first_extra = tops.len();
+        let info_idx = info.as_ref().map(|_| first_extra);
         let qibla_idx = extra.iter().position(|(_, q)| *q).map(|i| first_extra + i);
         let n_extra = extra.len();
         for (k, (p, _)) in extra.into_iter().enumerate() {
@@ -719,9 +1095,31 @@ impl Renderer {
         for p in &clock_pieces {
             draw(p)?;
         }
-        unsafe {
+        if let (Some(ci), Some(a)) = (clock_idx, &art) {
+            let c = &clock_pieces[ci];
+            let ox = c.x + match align {
+                1 => (c.w - a.w) / 2.0,
+                2 => c.w - a.w,
+                _ => 0.0,
+            };
+            self.draw_art(t, a, ox, c.y, &draw)?;
+            self.clock_rect.borrow_mut().insert(mi, RECT { left: (ox - u) as i32, top: (c.y - u) as i32, right: (ox + a.w + u) as i32, bottom: (c.y + a.h + u) as i32 });
+        } else if !st.show_clock {
+            self.clock_rect.borrow_mut().remove(&mi);
+        }
+        if let (Some(ii), Some(a)) = (info_idx, &info) {
+            let c = &clock_pieces[ii];
+            let ox = c.x + match align {
+                1 => (c.w - a.w) / 2.0,
+                2 => c.w - a.w,
+                _ => 0.0,
+            };
+            self.draw_art(t, a, ox, c.y, &draw)?;
+        }
+        if let (Some(ci), None) = (clock_idx, &art) {
+            unsafe {
             // am/pm sits right after the clock digits; remember the clock's box for seconds.
-            let c = &clock_pieces[1];
+            let c = &clock_pieces[ci];
             let mut cm = DWRITE_TEXT_METRICS::default();
             c.layout.GetMetrics(&mut cm)?;
             // Use the widest possible time, not this second's, so am/pm never shifts.
@@ -738,6 +1136,7 @@ impl Renderer {
                 draw(&ap)?;
             }
             self.clock_rect.borrow_mut().insert(mi, RECT { left: (dl - u) as i32, top: c.y as i32, right: (dr + 7.0 * u) as i32, bottom: (c.y + c.h) as i32 });
+            }
         }
         if has_next && st.progress_style != "off" {
             // progress from the last prayer to the next one
