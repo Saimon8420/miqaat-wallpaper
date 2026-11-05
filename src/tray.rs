@@ -15,6 +15,7 @@ pub const CMD_REFRESH: u32 = 4;
 pub const CMD_CREDIT: u32 = 5;
 pub const CMD_ABOUT: u32 = 6;
 pub const CMD_EXIT: u32 = 7;
+pub const CMD_UPDATE: u32 = 8;
 
 fn copy(dst: &mut [u16], s: &str) {
     let v: Vec<u16> = s.encode_utf16().take(dst.len() - 1).collect();
@@ -74,13 +75,17 @@ pub fn notify(hwnd: HWND, title: &str, body: &str) {
 }
 
 /// Shows the right-click menu and returns the chosen command (0 if none).
-pub fn menu(hwnd: HWND, paused: bool, credit: &str) -> u32 {
+pub fn menu(hwnd: HWND, paused: bool, credit: &str, update: Option<&str>) -> u32 {
     unsafe {
         let Ok(m) = CreatePopupMenu() else { return 0 };
         let item = |id: u32, text: &str| {
             let w: Vec<u16> = text.encode_utf16().chain([0]).collect();
             let _ = AppendMenuW(m, MF_STRING, id as usize, PCWSTR(w.as_ptr()));
         };
+        if let Some(v) = update {
+            item(CMD_UPDATE, &format!("Update to version {v}"));
+            let _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
+        }
         item(CMD_SETTINGS, "Settings…");
         item(CMD_NEXT_SCENE, "Next picture");
         item(CMD_PAUSE, if paused { "Resume" } else { "Pause" });

@@ -132,7 +132,15 @@ pub fn install() -> bool {
     }
     close_running();
     let _ = std::fs::create_dir_all(&dir);
-    if std::fs::copy(&me, &exe).is_err() {
+    let mut copied = false;
+    for _ in 0..20 {
+        if std::fs::copy(&me, &exe).is_ok() {
+            copied = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if !copied {
         ask("Could not copy the app into place. Please close Miqaat Wallpaper and try again.", MB_OK | MB_ICONWARNING);
         std::process::exit(1);
     }

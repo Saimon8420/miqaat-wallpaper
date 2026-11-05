@@ -14,6 +14,7 @@ mod app;
 mod assets;
 mod content;
 mod desktop;
+mod extras;
 mod hijri;
 mod i18n;
 mod install;
@@ -46,6 +47,8 @@ const TIMER_ATTACH: usize = 4;
 const TIMER_RETRY: usize = 5;
 const WM_TIMES: u32 = WM_APP + 2;
 const WM_SHOW_SETTINGS: u32 = WM_APP + 3;
+const WM_EVENTS: u32 = WM_APP + 4;
+const WM_UPDATE: u32 = WM_APP + 5;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -227,8 +230,113 @@ fn fullscreen_busy() -> bool {
 }
 
 /// The once-a-minute update: times, reminder, notifications, and the smallest repaint needed.
+/// Once a day: days until Ramadan and the two Eids (one tiny request, on a short-lived thread).
+fn ensure_events() {
+    let job = with_app(|a| {
+        let (days, _) = a.now();
+        let fresh = a.events.map(|(d, _)| d == days).unwrap_or(false);
+        if !a.s.show_event || fresh || a.events_fetching || times::utc_seconds() - a.events_try < 1800 {
+            return None;
+        }
+        a.events_fetching = true;
+        a.events_try = times::utc_seconds();
+        let (y, m, d) = times::civil_from_days(days);
+        Some((days, format!("{}/calendar/events?date={y:04}-{m:02}-{d:02}&adjustment={}", times::API, a.s.hijri_adjust)))
+    })
+    .flatten();
+    if let Some((days, url)) = job {
+        let target = ctl().0 as isize;
+        std::thread::spawn(move || {
+            let got = ureq::get(&url).timeout(std::time::Duration::from_secs(15)).call().ok().and_then(|r| r.into_json::<serde_json::Value>().ok()).and_then(|v| {
+                let d = v.get("data")?;
+                let n = |k: &str| d.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
+                Some([n("daysUntilRamadan"), n("daysUntilEidAlFitr"), n("daysUntilEidAlAdha")])
+            });
+            let p = Box::into_raw(Box::new(got.map(|e| (days, e)))) as isize;
+            unsafe {
+                if PostMessageW(Some(HWND(target as _)), WM_EVENTS, WPARAM(0), LPARAM(p)).is_err() {
+                    drop(Box::from_raw(p as *mut Option<(i64, [i64; 3])>));
+                }
+            }
+        });
+    }
+}
+
+/// Once a day, if switched on: is there a newer release on GitHub? Only for the installed copy.
+fn check_update() {
+    let go = with_app(|a| {
+        let due = a.s.auto_update && a.update.is_none() && times::utc_seconds() - a.update_checked > 86_400;
+        if due {
+            a.update_checked = times::utc_seconds();
+        }
+        due
+    })
+    .unwrap_or(false);
+    if !go || !install::is_installed_copy() {
+        return;
+    }
+    // The check runs in a short-lived copy of the app (`--check-update`), so the TLS and JSON
+    // work never stays in this process's memory. It leaves its answer in update.json.
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).arg("--check-update").spawn();
+    }
+}
+
+/// `--check-update`: ask GitHub for the latest release; if it is newer, save it and tell the
+/// running copy. Then exit.
+fn check_update_child() {
+    let url = "https://api.github.com/repos/Saimon8420/miqaat-wallpaper/releases/latest";
+    let found = ureq::get(url)
+        .set("User-Agent", "miqaat-wallpaper")
+        .timeout(std::time::Duration::from_secs(20))
+        .call()
+        .ok()
+        .and_then(|r| r.into_json::<serde_json::Value>().ok())
+        .and_then(|v| {
+            let tag = v.get("tag_name")?.as_str()?.trim_start_matches('v').to_string();
+            let asset = v.get("assets")?.as_array()?.iter().find_map(|a| {
+                let u = a.get("browser_download_url")?.as_str()?;
+                u.ends_with(".exe").then(|| u.to_string())
+            })?;
+            extras::newer(&tag, install::VERSION).then_some((tag, asset))
+        });
+    if let Some((v, u)) = found {
+        let _ = std::fs::write(settings::data_dir().join("update.json"), serde_json::json!({ "version": v, "url": u }).to_string());
+        unsafe {
+            if let Ok(h) = FindWindowW(w!("MiqaatWallpaperCtl"), None) {
+                let _ = PostMessageW(Some(h), WM_UPDATE, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+}
+
+/// Downloads the new version and runs it; it closes this copy, replaces it and starts again.
+fn run_update(url: String) {
+    std::thread::spawn(move || {
+        let path = std::env::temp_dir().join("MiqaatWallpaper-Setup.exe");
+        let ok = ureq::get(&url)
+            .set("User-Agent", "miqaat-wallpaper")
+            .timeout(std::time::Duration::from_secs(300))
+            .call()
+            .ok()
+            .and_then(|r| {
+                let mut f = std::fs::File::create(&path).ok()?;
+                std::io::copy(&mut r.into_reader(), &mut f).ok()
+            })
+            .map(|n| n > 1_000_000)
+            .unwrap_or(false);
+        if ok {
+            let _ = std::process::Command::new(&path).arg("--silent").spawn();
+        } else {
+            log("update download failed");
+        }
+    });
+}
+
 fn tick() {
     ensure_times();
+    ensure_events();
+    check_update();
     let pause_fs = with_app(|a| a.s.pause_fullscreen).unwrap_or(true);
     let busy = pause_fs && fullscreen_busy();
     let was_busy = with_app(|a| std::mem::replace(&mut a.busy, busy)).unwrap_or(false);
@@ -507,7 +615,14 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         (a.paused, if custom { "your own photo".to_string() } else { format!("{} · {}", s.name, s.credit) }, if custom { String::new() } else { s.source.to_string() })
                     })
                     .unwrap_or((false, String::new(), String::new()));
-                    match tray::menu(hwnd, paused, &credit) {
+                    let update = with_app(|a| a.update.as_ref().map(|u| u.0.clone())).flatten();
+                    match tray::menu(hwnd, paused, &credit, update.as_deref()) {
+                        tray::CMD_UPDATE => {
+                            if let Some(url) = with_app(|a| a.update.as_ref().map(|u| u.1.clone())).flatten() {
+                                tray::notify(hwnd, "Updating Miqaat Wallpaper", "Downloading the new version; it restarts by itself.");
+                                run_update(url);
+                            }
+                        }
                         tray::CMD_SETTINGS => settings_ui::open(),
                         tray::CMD_NEXT_SCENE => {
                             with_app(|a| {
@@ -546,6 +661,30 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 }
                 _ => {}
             }
+            LRESULT(0)
+        }
+        WM_EVENTS => {
+            let got = *Box::from_raw(lp.0 as *mut Option<(i64, [i64; 3])>);
+            with_app(|a| {
+                a.events_fetching = false;
+                if got.is_some() {
+                    a.events = got;
+                }
+            });
+            if got.is_some() {
+                let r = with_app(|a| a.panel_rects()).unwrap_or_default();
+                r.into_iter().for_each(|r| invalidate(Some(r)));
+            }
+            LRESULT(0)
+        }
+        WM_UPDATE => {
+            let saved = std::fs::read_to_string(settings::data_dir().join("update.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+            let Some((v, url)) = saved.and_then(|j| Some((j.get("version")?.as_str()?.to_string(), j.get("url")?.as_str()?.to_string()))) else { return LRESULT(0) };
+            if !extras::newer(&v, install::VERSION) {
+                return LRESULT(0);
+            }
+            with_app(|a| a.update = Some((v.clone(), url)));
+            tray::notify(hwnd, &format!("Miqaat Wallpaper {v} is available"), "Right-click the moon icon near the clock and choose Update.");
             LRESULT(0)
         }
         WM_SHOW_SETTINGS => {
@@ -635,6 +774,10 @@ fn main() -> windows::core::Result<()> {
 
     if let Some(out) = arg_after(&args, "--snapshot") {
         return snapshot(&args, out);
+    }
+    if has("--check-update") {
+        check_update_child();
+        return Ok(());
     }
     if has("--uninstall") {
         install::uninstall();
