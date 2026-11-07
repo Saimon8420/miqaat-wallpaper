@@ -343,6 +343,214 @@
   "grain": 0.0
  },
  {
+  "id": "lamp-in-the-mihrab",
+  "name": "Lamp in the mihrab",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "الله نور",
+   "السماوات والأرض"
+  ],
+  "en": "Allah is the Light of the heavens and the earth",
+  "ref": "An-Nur 24:35",
+  "font": "EM",
+  "ink": "#f3dfa2",
+  "panel": "#f6f2ea",
+  "accent": "#e2bf6a",
+  "scale": 1,
+  "box": [
+   150,
+   70,
+   842,
+   280
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.16
+ },
+ {
+  "id": "night-caravan",
+  "name": "Night caravan",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "سبحان الذي أسرى",
+   "بعبده ليلا"
+  ],
+  "en": "Exalted is He who took His servant by night",
+  "ref": "Al-Isra 17:1",
+  "font": "CH",
+  "ink": "#efe6ff",
+  "panel": "#f6f2ea",
+  "accent": "#cdb8ff",
+  "scale": 0.95,
+  "box": [
+   150,
+   90,
+   842,
+   430
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "moonlit-arcade",
+  "name": "Moonlit arcade",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "والليل",
+   "إذا سجى"
+  ],
+  "en": "By the night when it covers with darkness",
+  "ref": "Ad-Duha 93:2",
+  "font": "NK",
+  "ink": "#e6ecf4",
+  "panel": "#f2f6f8",
+  "accent": "#a9c8e8",
+  "scale": 1.1,
+  "box": [
+   150,
+   80,
+   842,
+   320
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.14
+ },
+ {
+  "id": "monsoon-night",
+  "name": "Monsoon night",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "وهو الذي ينزل الغيث",
+   "من بعد ما قنطوا"
+  ],
+  "en": "And it is He who sends down the rain after they had despaired",
+  "ref": "Ash-Shura 42:28",
+  "font": "NK",
+  "ink": "#e4edf2",
+  "panel": "#f2f6f8",
+  "accent": "#9fc6dc",
+  "scale": 0.9,
+  "box": [
+   150,
+   90,
+   842,
+   400
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "winter-night",
+  "name": "Winter night",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "وجعلنا الليل",
+   "لباسا"
+  ],
+  "en": "And We made the night as a covering",
+  "ref": "An-Naba 78:10",
+  "font": "RK",
+  "ink": "#eef3fa",
+  "panel": "#f2f6f8",
+  "accent": "#b9d4ee",
+  "scale": 1.05,
+  "box": [
+   150,
+   90,
+   842,
+   420
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "river-boat",
+  "name": "River boat",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "وسخر لكم الفلك",
+   "لتجري في البحر بأمره"
+  ],
+  "en": "And He subjected for you the ships to sail through the sea by His command",
+  "ref": "Ibrahim 14:32",
+  "font": "EM",
+  "ink": "#f1e6c4",
+  "panel": "#f6f2ea",
+  "accent": "#e2c27a",
+  "scale": 0.95,
+  "box": [
+   150,
+   70,
+   842,
+   360
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "mountains-under-stars",
+  "name": "Mountains under stars",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "ألم نجعل الأرض مهادا",
+   "والجبال أوتادا"
+  ],
+  "en": "Have We not made the earth a resting place, and the mountains as pegs?",
+  "ref": "An-Naba 78:6-7",
+  "font": "CH",
+  "ink": "#e9eef8",
+  "panel": "#f2f6f8",
+  "accent": "#a9c2ea",
+  "scale": 0.95,
+  "box": [
+   150,
+   90,
+   842,
+   400
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
+  "id": "palms-at-moonrise",
+  "name": "Palms at moonrise",
+  "occasion": false,
+  "tag": "",
+  "ar": [
+   "والقمر قدرناه منازل",
+   "حتى عاد كالعرجون القديم"
+  ],
+  "en": "And the moon, We have determined for it phases, until it returns like the old date stalk",
+  "ref": "Ya-Sin 36:39",
+  "font": "AX",
+  "ink": "#f6e7c8",
+  "panel": "#f6f2ea",
+  "accent": "#e8b878",
+  "scale": 0.9,
+  "box": [
+   150,
+   60,
+   842,
+   330
+  ],
+  "no_meaning": false,
+  "watermark": null,
+  "grain": 0.0
+ },
+ {
   "id": "ramadan-night",
   "name": "Ramadan night",
   "occasion": true,

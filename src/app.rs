@@ -522,9 +522,10 @@ impl App {
 
         let saving = self.battery_saving();
         let mut light = crate::light::at(now, &minutes, self.s.night_dark.min(100) as f32 / 100.0, self.s.light_follows);
-        // A light calligraphy scene keeps its dark text readable: no night darkening on it.
-        if self.calligraphy_now().map(crate::calligraphy::light).unwrap_or(false) {
-            light.dark = 0.0;
+        // A light calligraphy scene keeps its dark text readable: no night darkening on it. A dark
+        // one is already a night picture, so only a little, or its lettering turns grey.
+        if let Some(c) = self.calligraphy_now() {
+            light.dark = if crate::calligraphy::light(c) { 0.0 } else { light.dark.min(0.2) };
         }
         let zoom = if self.s.drift && !saving {
             let t = (times::utc_seconds() / 60) as f32 % 40.0 / 40.0;

@@ -229,6 +229,6 @@ mod tests {
         assert_eq!(id(12, 10), Some("eid-prayer-at-the-eidgah"));
         assert_eq!(id(12, 14), None);
         assert_eq!(id(5, 24), None);
-        assert_eq!(everyday().len(), 13);
+        assert_eq!(everyday().len(), 21);
     }
 }
