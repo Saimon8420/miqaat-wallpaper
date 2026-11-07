@@ -63,6 +63,7 @@ ed("<li>All of it is packed into one small offline file (about 3–5 MB), so not
 
 # Calligraphy gallery: real renders from the app itself (needs a release build in target/release).
 GALLERY = [("illuminated-page", "Illuminated page"), ("night-over-the-mosque", "Night over the mosque"), ("lanterns", "Lanterns"),
+           ("lamp-in-the-mihrab", "Lamp in the mihrab"), ("night-caravan", "Night caravan"), ("river-boat", "River boat"),
            ("tone-on-tone-allah", "Tone on tone"), ("ramadan-night", "Ramadan night"), ("eid-morning", "Eid morning"),
            ("day-of-arafah", "Day of Arafah"), ("eid-prayer-at-the-eidgah", "Eid al-Adha"), ("takbir-of-eid", "Takbir of Eid")]
 EXE = REPO / "target/release/MiqaatWallpaper.exe"
@@ -90,7 +91,7 @@ gallery = "".join(f'<figure><img src="calligraphy/{sid}.jpg" alt="{name}" loadin
 
 ed("""        <li>Turn it off and the wallpaper goes back to updating once a minute</li></ul></div></div>
     </div>""", """        <li>Turn it off and the wallpaper goes back to updating once a minute</li></ul></div></div>
-      <div class="cell b6"><div class="core"><span class="tag">Calligraphy</span><h3>13 scenes drawn by the app</h3><ul>
+      <div class="cell b6"><div class="core"><span class="tag">Calligraphy</span><h3>21 scenes drawn by the app</h3><ul>
         <li>An illuminated page, a night over an Ottoman mosque, dunes at dawn, lanterns, ink and seal, zellige, an oasis, a moonlit sea and more</li>
         <li>Each with a phrase in bold Kufi lettering, its meaning and its source</li>
         <li>Vector art, sharp on any screen; drawn once when the picture changes, no extra memory</li></ul></div></div>
