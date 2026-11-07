@@ -117,6 +117,8 @@ pub struct Settings {
     pub clock_design: String,
     /// How fasting, the next event and Qibla are shown: lines, chips, cards or strip
     pub info_style: String,
+    /// The date line: line (one line), hijri (Hijri date first), moon (moon phase) or short
+    pub date_style: String,
 }
 
 impl Default for Settings {
@@ -201,6 +203,7 @@ impl Default for Settings {
             show_clock: true,
             clock_design: "classic".into(),
             info_style: "cards".into(),
+            date_style: "line".into(),
         }
     }
 }

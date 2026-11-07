@@ -54,6 +54,11 @@ impl Hijri {
         Hijri { day: d, month: (my.rem_euclid(12) + 1) as u32, year: my.div_euclid(12) as u32 }
     }
 
+    /// Day and month without the year.
+    pub fn text_short(&self, l: Lang) -> String {
+        crate::i18n::digits(l, false, &format!("{} {}", self.day, crate::i18n::hijri_month(l, self.month)))
+    }
+
     pub fn text(&self, l: Lang) -> String {
         let s = match l {
             Lang::Ar => format!("{} {} {} هـ", self.day, crate::i18n::hijri_month(l, self.month), self.year),

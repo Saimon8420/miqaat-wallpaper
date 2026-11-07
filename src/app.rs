@@ -83,6 +83,12 @@ fn date_text(days: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+const WEEKDAYS_SHORT: [[&str; 7]; 3] = [
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    ["রবি", "সোম", "মঙ্গল", "বুধ", "বৃহস্পতি", "শুক্র", "শনি"],
+    ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"],
+];
+
 const WEEKDAYS: [[&str; 7]; 3] = [
     ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
     ["রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"],
@@ -329,6 +335,7 @@ impl App {
             show_clock: self.s.show_clock,
             clock_design: self.s.clock_design.clone(),
             info_style: self.s.info_style.clone(),
+            date_style: self.s.date_style.clone(),
         };
         // A calligraphy scene brings its own text colour; on a light one the text is dark and
         // nothing dark goes behind it. The accent stays the one the user picked — on a light
@@ -396,8 +403,56 @@ impl App {
             meta.push(crate::extras::gregorian(l, y, m, d));
         }
         if !place.is_empty() && self.s.show_city {
-            meta.push(place);
+            meta.push(place.clone());
         }
+        let sep = if l == Lang::Ar { "، " } else { " · " };
+        // Hijri first / moon phase: the Hijri date on its own line, the rest under it
+        let (mut date_head, mut date_sub) = (String::new(), String::new());
+        if matches!(self.s.date_style.as_str(), "hijri" | "moon") {
+            if let (Some(h), true) = (h, self.s.show_hijri) {
+                date_head = h.text(l);
+                let mut rest = vec![];
+                if self.s.show_weekday {
+                    rest.push(wd.to_string());
+                }
+                if self.s.show_date {
+                    let (y, m, d) = times::civil_from_days(days);
+                    rest.push(crate::extras::gregorian(l, y, m, d));
+                }
+                if !place.is_empty() && self.s.show_city {
+                    rest.push(place.clone());
+                }
+                date_sub = rest.join(sep);
+            }
+        }
+        // Short: "Sun 8 Nov | 27 Jumada al-Awwal | Dhaka"
+        if self.s.date_style == "short" {
+            let mut parts = vec![];
+            let mut first = vec![];
+            if self.s.show_weekday {
+                first.push(WEEKDAYS_SHORT[match l {
+                    Lang::En => 0,
+                    Lang::Bn => 1,
+                    Lang::Ar => 2,
+                }][times::weekday(days) as usize].to_string());
+            }
+            if self.s.show_date {
+                let (_, m, d) = times::civil_from_days(days);
+                first.push(crate::extras::gregorian_short(l, m, d));
+            }
+            if !first.is_empty() {
+                parts.push(first.join(" "));
+            }
+            if let (Some(h), true) = (h, self.s.show_hijri) {
+                parts.push(h.text_short(l));
+            }
+            if !place.is_empty() && self.s.show_city {
+                parts.push(place.clone());
+            }
+            meta = parts;
+        }
+        let meta_sep = if self.s.date_style == "short" { "  |  " } else { sep };
+        let moon_day = h.map(|h| h.day);
 
         let (next, progress, rows);
         let mut minutes = [300, 360, 720, 960, 1080, 1170];
@@ -491,7 +546,10 @@ impl App {
             ampm,
             seconds,
             // A dot would read as the Arabic zero (٠), so Arabic uses its own comma.
-            meta: meta.join(if l == Lang::Ar { "، " } else { " · " }),
+            meta: meta.join(meta_sep),
+            date_head,
+            date_sub,
+            moon_day,
             next,
             progress,
             special,

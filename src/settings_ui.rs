@@ -137,6 +137,7 @@ fn rows() -> Vec<Row> {
         r(3, "Clock", "Progress", "Time until the next prayer", "progress_style", seg(&[("line", "Line"), ("dots", "Dots"), ("ring", "Ring"), ("off", "Off")])),
         r(3, "Clock", "Arabic digits", "Arabic-Indic digits for the clock and times", "arabic_digits", Ctl::Switch),
         r(3, "Clock", "Show seconds", "Redraws only the clock, once a second", "seconds", Ctl::Switch),
+        r(3, "Date line", "Style", "", "date_style", seg(&[("line", "One line"), ("hijri", "Hijri first"), ("moon", "Moon phase"), ("short", "Short")])),
         r(3, "Date line", "Show", "", "", Ctl::DateParts),
         r(3, "Date line", "Capital letters", "For the date line and labels", "caps", Ctl::Switch),
         r(3, "Text", "Text size", "", "text_size", Ctl::Slider(80, 130, "%")),

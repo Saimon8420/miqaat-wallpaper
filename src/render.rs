@@ -36,6 +36,11 @@ pub struct Frame {
     pub ampm: String,
     pub seconds: Option<String>,
     pub meta: String,
+    /// For the Hijri-first and moon styles: the big line and the small line under it.
+    pub date_head: String,
+    pub date_sub: String,
+    /// Day of the Hijri month, for the moon drawing.
+    pub moon_day: Option<u32>,
     pub next: String,
     pub progress: f32,
     pub special: Option<(String, String)>,
@@ -94,6 +99,7 @@ pub struct Style {
     pub clock_design: String,
     /// lines, chips, cards or strip
     pub info_style: String,
+    pub date_style: String,
 }
 
 /// A built-in font as a DirectWrite collection, and its family name as DirectWrite sees it
@@ -210,6 +216,8 @@ enum ArtItem {
     Circle { c: Vector2, r: f32, fill: Option<D2D1_COLOR_F>, stroke: Option<(D2D1_COLOR_F, f32)> },
     /// An arc from angle `a0` to `a1` (radians, 0 = right, clockwise).
     Arc { c: Vector2, r: f32, a0: f32, a1: f32, w: f32, col: D2D1_COLOR_F },
+    /// The moon as it looks on day `day` of the Hijri month (lit side on the right while waxing).
+    Moon { c: Vector2, r: f32, day: u32, lit: D2D1_COLOR_F, dark: D2D1_COLOR_F },
 }
 
 fn v2(x: f32, y: f32) -> Vector2 {
@@ -661,6 +669,33 @@ impl Renderer {
                         sink.Close()?;
                         t.DrawGeometry(&geo, &t.CreateSolidColorBrush(col, None)?, *w, None);
                     }
+                    ArtItem::Moon { c, r, day, lit, dark } => {
+                        let c = mv(*c);
+                        let r = *r;
+                        t.FillEllipse(&D2D1_ELLIPSE { point: c, radiusX: r, radiusY: r }, &t.CreateSolidColorBrush(dark, None)?);
+                        // age of the moon as a fraction of a lunation (day 1 ≈ new crescent)
+                        let p = ((*day as f32 - 0.5) / 29.53).clamp(0.02, 0.98);
+                        let waxing = p < 0.5;
+                        let tx = (std::f32::consts::TAU * p).cos(); // > 0: crescent, < 0: gibbous
+                        let rx = (r * tx.abs()).max(0.01);
+                        let (top, bottom) = (v2(c.X, c.Y - r), v2(c.X, c.Y + r));
+                        use D2D1_SWEEP_DIRECTION_CLOCKWISE as CW;
+                        use D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE as CCW;
+                        // the lit limb, then the terminator back to the top
+                        let limb = if waxing { CW } else { CCW };
+                        let term = match (waxing, tx > 0.0) {
+                            (true, true) | (false, false) => CCW,
+                            _ => CW,
+                        };
+                        let geo = self.factory.CreatePathGeometry()?;
+                        let sink = geo.Open()?;
+                        sink.BeginFigure(top, D2D1_FIGURE_BEGIN_FILLED);
+                        sink.AddArc(&D2D1_ARC_SEGMENT { point: bottom, size: D2D_SIZE_F { width: r, height: r }, rotationAngle: 0.0, sweepDirection: limb, arcSize: D2D1_ARC_SIZE_SMALL });
+                        sink.AddArc(&D2D1_ARC_SEGMENT { point: top, size: D2D_SIZE_F { width: rx, height: r }, rotationAngle: 0.0, sweepDirection: term, arcSize: D2D1_ARC_SIZE_SMALL });
+                        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                        sink.Close()?;
+                        t.FillGeometry(&geo, &t.CreateSolidColorBrush(lit, None)?, None);
+                    }
                 }
             }
         }
@@ -816,8 +851,57 @@ impl Renderer {
         } else {
             None
         };
-        let mut tops = vec![(self.piece(&caps(&f.meta), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, 0.12 * u * track * if st.caps { 1.0 } else { 0.0 }, faint)?, 0.2 * u)];
-        let clock_idx = st.show_clock.then_some(1);
+        // The date line, in the chosen style (a bar has room for one line only).
+        let ds = if bar || f.date_head.is_empty() { "line" } else { st.date_style.as_str() };
+        let spacing = 0.12 * u * track * if st.caps { 1.0 } else { 0.0 };
+        let mut date_art: Option<Art> = None;
+        let mut tops = match ds {
+            "hijri" => {
+                let mut v = vec![(self.piece(&caps(&f.date_head), &self.format(label, 1.3 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, spacing, acc)?, 0.1 * u)];
+                if !f.date_sub.is_empty() {
+                    v.push((self.piece(&caps(&f.date_sub), &self.format(label, 0.9 * u, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels)?, clock_w, align, spacing, faint)?, 0.2 * u));
+                }
+                v
+            }
+            "moon" => {
+                // the moon on the left (right in Arabic), the Hijri date beside it, the rest under it
+                let mr = 1.25 * u;
+                let gap = 0.8 * u;
+                let tw = (clock_w - 2.0 * mr - gap).max(1.0);
+                let ta: u8 = if st.rtl_labels { 2 } else { 0 }; // text hugs the moon
+                let mut head = self.label_piece(&caps(&f.date_head), label, 1.15 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels, ta, tw, white)?;
+                let hw = self.width(&head)?;
+                let sub = if f.date_sub.is_empty() { None } else { Some(self.label_piece(&caps(&f.date_sub), label, 0.85 * u, DWRITE_FONT_WEIGHT_NORMAL, st.rtl_labels, ta, tw, faint)?) };
+                let sw = match &sub { Some(p) => self.width(p)?, None => 0.0 };
+                let text_w = hw.max(sw).min(tw);
+                let text_h = head.h + sub.as_ref().map(|p| p.h).unwrap_or(0.0);
+                let h = text_h.max(2.0 * mr);
+                let total = 2.0 * mr + gap + text_w;
+                let rtl = st.rtl_labels;
+                let (mx, tx) = if rtl { (total - mr, 0.0) } else { (mr, 2.0 * mr + gap) };
+                let mut items = vec![ArtItem::Moon { c: v2(mx, h / 2.0), r: mr, day: f.moon_day.unwrap_or(15), lit: rgba(0.96, 0.92, 0.80, 1.0), dark: rgba(tr, tg, tb, 0.16) }];
+                let ty = (h - text_h) / 2.0;
+                // label pieces are laid out in a box `tw` wide: in Arabic the text sits at the box's
+                // right edge, so move the box until that edge meets the text column's right edge
+                let shift = |_: f32| if rtl { text_w - tw } else { 0.0 };
+                head.x = tx + shift(hw);
+                head.y = ty;
+                let hh = head.h;
+                items.push(ArtItem::Text(head));
+                if let Some(mut p) = sub {
+                    p.x = tx + shift(sw);
+                    p.y = ty + hh;
+                    items.push(ArtItem::Text(p));
+                }
+                let a = Art { w: total, h, items };
+                let blank = self.blank(a.h, clock_w)?;
+                date_art = Some(a);
+                vec![(blank, 0.35 * u)]
+            }
+            _ => vec![(self.piece(&caps(&f.meta), &self.format(label, 0.95 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, clock_w, align, spacing, faint)?, 0.2 * u)],
+        };
+        let date_n = tops.len();
+        let clock_idx = st.show_clock.then_some(date_n);
         if st.show_clock {
             match &art {
                 // an empty piece that only holds the drawing's place
@@ -1106,6 +1190,15 @@ impl Renderer {
             self.clock_rect.borrow_mut().insert(mi, RECT { left: (ox - u) as i32, top: (c.y - u) as i32, right: (ox + a.w + u) as i32, bottom: (c.y + a.h + u) as i32 });
         } else if !st.show_clock {
             self.clock_rect.borrow_mut().remove(&mi);
+        }
+        if let Some(a) = &date_art {
+            let c = &clock_pieces[0];
+            let ox = c.x + match align {
+                1 => (c.w - a.w) / 2.0,
+                2 => c.w - a.w,
+                _ => 0.0,
+            };
+            self.draw_art(t, a, ox, c.y, &draw)?;
         }
         if let (Some(ii), Some(a)) = (info_idx, &info) {
             let c = &clock_pieces[ii];

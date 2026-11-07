@@ -55,6 +55,13 @@ pub fn countdown(l: Lang, style: &str, name: &str, mins: u32, at: &str) -> Strin
     digits(l, false, &s)
 }
 
+/// "8 Nov" — the date without the year, for the short date line.
+pub fn gregorian_short(l: Lang, m: u32, d: u32) -> String {
+    let full = gregorian(l, 0, m, d);
+    // gregorian() ends with the year; drop it
+    full.rsplit_once(' ').map(|(a, _)| a.to_string()).unwrap_or(full)
+}
+
 pub fn gregorian(l: Lang, y: i32, m: u32, d: u32) -> String {
     const EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const BN: [&str; 12] = ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"];
