@@ -330,14 +330,20 @@ impl App {
             clock_design: self.s.clock_design.clone(),
             info_style: self.s.info_style.clone(),
         };
-        // A calligraphy scene brings its own panel colours; on a light one the text is dark and
-        // nothing dark goes behind it.
+        // A calligraphy scene brings its own text colour; on a light one the text is dark and
+        // nothing dark goes behind it. The accent stays the one the user picked — on a light
+        // scene a pale accent is darkened until it reads on the pale picture.
         if let Some(c) = self.calligraphy_now() {
             st.tone = crate::render::parse_hex(c.panel).unwrap_or(st.tone);
-            st.accent = crate::render::parse_hex(c.accent).unwrap_or(st.accent);
             if crate::calligraphy::light(c) {
                 st.behind = "none".into();
                 st.shadow = 0;
+                let lum = |a: [f32; 3]| 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+                let mut a = st.accent;
+                while lum(a) > 0.32 {
+                    a = a.map(|v| v * 0.85);
+                }
+                st.accent = a;
             }
         }
         st
