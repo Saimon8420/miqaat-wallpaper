@@ -14,7 +14,7 @@ import subprocess
 import sys
 import urllib.request
 
-from refs import ADHKAR_CHAPTERS, HADITH, QURAN
+from refs import ADHKAR_CHAPTERS, ADHKAR_MORE, HADITH, QURAN, QURAN_DHIKR, QURAN_DUAS, QURAN_MORE
 
 ROOT = pathlib.Path(__file__).resolve().parent
 RAW = ROOT / "raw"
@@ -43,16 +43,30 @@ def arabic_digits(n: int) -> str:
 
 # ---------------- Quran ----------------
 def quran():
-    refs = ",".join(f"{s}:{a}-{b}" for s, a, b, _ in QURAN)
+    seen = {(s, a) for s, a, _, _ in QURAN}
+    more = [(s, a, b, []) for s, a, b in QURAN_MORE if (s, a) not in seen and not seen.add((s, a))]
+    seen_d = set()
+    duas = [(s, a, b, ["dua"]) for s, a, b in QURAN_DUAS if (s, a) not in seen_d and not seen_d.add((s, a))]
+    duas += [(s, a, b, ["dhikr"]) for s, a, b in QURAN_DHIKR if (s, a) not in seen_d and not seen_d.add((s, a))]
+    # a verse that is now a dua or dhikr isn't also kept as a plain verse
+    dua_keys = {(s, a) for s, a, _, _ in duas}
+    verses = [r for r in QURAN + more if (r[0], r[1]) not in dua_keys]
+    every = verses + duas
+    refs = ",".join(f"{s}:{a}-{b}" for s, a, b, _ in every)
     data = json.loads(subprocess.check_output(["node", "quran.mjs", refs], cwd=ROOT))
     items = []
-    for s, a, b, tags in QURAN:
+    for s, a, b, tags in every:
         d = data[f"{s}:{a}-{b}"]
         ar = " ".join(f"{clean(v['ar'])} ﴿{arabic_digits(n)}﴾" if b > a else clean(v["ar"]) for n, v in zip(range(a, b + 1), d["verses"]))
         en = " ".join(clean(v["en"]) for v in d["verses"])
         bn = " ".join(clean(v["bn"]) for v in d["verses"])
         ref = f"{d['surahEn']} {s}:{a}" + (f"–{b}" if b > a else "")
-        items.append({"kind": "quran", "tags": tags, "ar": ar, "en": en, "bn": bn, "ref": ref})
+        is_dua = (s, a) in dua_keys
+        kind = ("dhikr" if "dhikr" in tags else "dua") if is_dua else "quran"
+        item = {"kind": kind, "tags": tags, "ar": ar, "en": en, "bn": bn, "ref": ref}
+        if is_dua:
+            item["slot"] = kind
+        items.append(item)
     return items
 
 
@@ -212,21 +226,36 @@ def hisn_json(text: str):
 
 def adhkar():
     items = []
-    for cid, slot in ADHKAR_CHAPTERS.items():
+    for cid, slot in {**ADHKAR_CHAPTERS, **ADHKAR_MORE}.items():
         ar = hisn_json(get(f"https://www.hisnmuslim.com/api/ar/{cid}.json", RAW / f"hisn-ar-{cid}.json"))
         en = hisn_json(get(f"https://www.hisnmuslim.com/api/en/{cid}.json", RAW / f"hisn-en-{cid}.json"))
         ar_rows, en_rows = list(ar.values())[0], {r["ID"]: r for r in list(en.values())[0]}
         for r in ar_rows:
             e = en_rows.get(r["ID"], {})
             # The book wraps each dhikr in (( )) and its translation in ( ); not needed on a wallpaper.
-            text = clean(r["ARABIC_TEXT"]).removeprefix("((").removesuffix(".").removesuffix("))").strip()
+            text = clean(r["ARABIC_TEXT"])
+            # A few items start with the narrator ("And he ﷺ said: ((…"): keep only the words inside (( )).
+            if "((" in text and not text.startswith("(("):
+                text = text[text.index("((") + 2:]
+                text = text[:text.index("))")] if "))" in text else text
+            text = text.removeprefix("((").removesuffix(".").removesuffix("))").strip()
+            text = clean(text.replace("((", "").replace("))", ""))
             text = clean(re.sub(r"\[\s*وإذا أمسى[^\]]*\]?", "", text)).removesuffix(".").removesuffix("))").strip()  # the book's evening note
             if len(text) > 420:  # too long to read on a wallpaper; still in the book
                 continue
             meaning = english(e.get("TRANSLATED_TEXT", ""))
             if len(meaning) < 8 or meaning.startswith(("i.e.", "Note:")):  # no translation, only a note
                 continue
+            if re.match(r"(?i)\W*(\w+ )?(\w+ )?(reported|narrated)", meaning[:60]):  # a story about a dhikr, not words to say
+                continue
             kind = {"istighfar": "istighfar", "durood": "durood", "dhikr": "dhikr"}.get(slot, "dua")
+            # words of dhikr filed under a dua chapter are dhikr
+            bare = re.sub(r"[ً-ٰٟۖ-ۭ]", "", text)
+            if kind == "dua" and slot == "dua":
+                if bare.startswith(("سبحان", "لا إله إلا الله", "لا إله إلا الله", "الحمد لله", "الله أكبر", "لا حول ولا قوة")):
+                    kind = "dhikr"
+                elif bare.startswith("أستغفر"):
+                    kind = "istighfar"
             items.append({"kind": kind, "slot": slot, "ar": text, "en": meaning, "bn": bangla_hisn().get(int(r["ID"]), ""),
                           "translit": clean(e.get("LANGUAGE_ARABIC_TRANSLATED_TEXT", "")), "repeat": r.get("REPEAT", 1),
                           "ref": f"Hisn al-Muslim {r['ID']}"})
