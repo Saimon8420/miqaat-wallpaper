@@ -1,6 +1,6 @@
 # Miqaat Wallpaper
 
-A calm live wallpaper for Windows. Today's prayer times, the next prayer, and one authentic reminder at a time with its source, drawn behind your desktop icons on a photo of a great mosque or a quiet landscape. It's written in Rust and uses about 30 MB of memory.
+A calm live wallpaper for Windows. Today's prayer times, the next prayer, and one authentic reminder at a time with its source, drawn behind your desktop icons on a photo of a great mosque or a quiet landscape. It's written in Rust and uses about 21 MB of memory, and almost no CPU while windows cover it.
 
 **[Download for Windows](https://github.com/Saimon8420/miqaat-wallpaper/releases/latest/download/MiqaatWallpaper-Setup.exe)** · **[Live demo](https://saimon8420.github.io/miqaat-wallpaper/)** · [How to install](#install)
 
@@ -22,6 +22,7 @@ The **[live demo](https://saimon8420.github.io/miqaat-wallpaper/)** is an intera
 - **Prayer times** for any city, from the [Miqaat API](https://miqaat-dev.vercel.app), with 12 calculation methods, Standard or Hanafi Asr, and a Hijri date you can adjust by ±2 days to match your country's moon sighting.
 - **The next prayer** with a countdown and a progress line. You can turn on a small, quiet Windows notification at each prayer time.
 - **One reminder at a time** (Quran, hadith, dua, dhikr, istighfar or durood), in Arabic with its meaning in English or Bangla and the exact reference.
+- **Eight reminder styles:** Classic, Accent line, Frame, Verse marks, Chips, Minimal, Glass card and Side by side.
 - **Reminders follow the time of day:** morning adhkar after Fajr, adhkar after each salah, evening adhkar after Asr, the iftar dua in Ramadan, and duas before sleep.
 - **Special days**, shown only where the evidence is clear: White Days, Mondays and Thursdays, Ashura, the Day of Arafah, the first ten days of Dhu al-Hijjah, the last ten nights of Ramadan, Eid, Shawwal and Fridays. Fasting days get a heads-up the evening before.
 - **20 pictures** (Kaaba, Madinah, Al-Aqsa, Córdoba, Hagia Sophia, Shat Gumbad, Star Mosque and more), or your own photo. Keep one, or get a new one every day or at each prayer.
@@ -68,11 +69,11 @@ No text was typed from memory. A build script pulls every word from published da
 
 | | Source | Count |
 |---|---|---|
-| Quran | [holy-quran](https://www.npmjs.com/package/holy-quran) (MIT): Hafs text, Sahih International English, Bangla | 237 short, complete verses |
+| Quran | [holy-quran](https://www.npmjs.com/package/holy-quran) (MIT): Hafs text, Sahih International English, Bangla | 343 short, complete verses, plus 83 of the Quran's own duas and words of praise |
 | Hadith | [hadith-api](https://github.com/fawazahmed0/hadith-api) (public domain), with gradings | 224 from Bukhari, Muslim, Tirmidhi, Abu Dawud, Ibn Majah and all of an-Nawawi's Forty |
-| Adhkar | *Hisn al-Muslim* via [hisnmuslim.com](https://www.hisnmuslim.com), with item numbers | 220 duas, dhikr, istighfar and durood, all with Bangla |
+| Adhkar | *Hisn al-Muslim* via [hisnmuslim.com](https://www.hisnmuslim.com), with item numbers | 242 duas, dhikr, istighfar and durood, all with Bangla |
 
-The library is a 1 MB file built into the app, so reminders never need the internet. Prayer times are fetched once a month and saved. If you're offline, the saved month keeps working.
+The library is a 1.2 MB file built into the app, so reminders never need the internet. Prayer times are fetched once a month and saved. If you're offline, the saved month keeps working.
 
 Days whose special worship is disputed are deliberately left out.
 
