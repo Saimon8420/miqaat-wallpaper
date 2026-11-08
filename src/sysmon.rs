@@ -26,6 +26,10 @@ pub struct Sample {
 
 pub struct Monitor {
     query: isize,
+    /// The GPU counter has one instance per engine of every process, so it is by far the most
+    /// expensive to read. It lives in its own query, read every third sample.
+    gpu_query: isize,
+    gpu_turn: u32,
     gpu: isize,
     disk: isize,
     down: isize,
@@ -42,7 +46,7 @@ fn ft(f: FILETIME) -> u64 {
 
 impl Monitor {
     pub fn new() -> Self {
-        let mut m = Monitor { query: 0, gpu: 0, disk: 0, down: 0, up: 0, last_cpu: None, now: Sample::default(), history: Default::default() };
+        let mut m = Monitor { query: 0, gpu_query: 0, gpu_turn: 0, gpu: 0, disk: 0, down: 0, up: 0, last_cpu: None, now: Sample::default(), history: Default::default() };
         unsafe {
             let mut q = PDH_HQUERY::default();
             if PdhOpenQueryW(PCWSTR::null(), 0, &mut q) == 0 {
@@ -51,11 +55,19 @@ impl Monitor {
                     let mut c = PDH_HCOUNTER::default();
                     if PdhAddEnglishCounterW(q, path, 0, &mut c) == 0 { c.0 as isize } else { 0 }
                 };
-                m.gpu = add(w!("\\GPU Engine(*engtype_3D)\\Utilization Percentage"));
                 m.disk = add(w!("\\PhysicalDisk(_Total)\\% Disk Time"));
                 m.down = add(w!("\\Network Interface(*)\\Bytes Received/sec"));
                 m.up = add(w!("\\Network Interface(*)\\Bytes Sent/sec"));
                 let _ = PdhCollectQueryData(q);
+            }
+            let mut g = PDH_HQUERY::default();
+            if PdhOpenQueryW(PCWSTR::null(), 0, &mut g) == 0 {
+                m.gpu_query = g.0 as isize;
+                let mut c = PDH_HCOUNTER::default();
+                if PdhAddEnglishCounterW(g, w!("\\GPU Engine(*engtype_3D)\\Utilization Percentage"), 0, &mut c) == 0 {
+                    m.gpu = c.0 as isize;
+                }
+                let _ = PdhCollectQueryData(g);
             }
         }
         m
@@ -101,11 +113,15 @@ impl Monitor {
                 s.mem_used_gb = (ms.ullTotalPhys - ms.ullAvailPhys) as f32 / 1073741824.0;
             }
             if self.query != 0 && PdhCollectQueryData(PDH_HQUERY(self.query as *mut _)) == 0 {
-                s.gpu = (Self::sum(self.gpu) as f32 / 100.0).clamp(0.0, 1.0);
                 s.disk = (Self::sum(self.disk) as f32 / 100.0).clamp(0.0, 1.0);
                 s.down = Self::sum(self.down);
                 s.up = Self::sum(self.up);
             }
+            s.gpu = self.now.gpu;
+            if self.gpu_turn.is_multiple_of(3) && self.gpu_query != 0 && PdhCollectQueryData(PDH_HQUERY(self.gpu_query as *mut _)) == 0 {
+                s.gpu = (Self::sum(self.gpu) as f32 / 100.0).clamp(0.0, 1.0);
+            }
+            self.gpu_turn = self.gpu_turn.wrapping_add(1);
         }
         // Network history on a log scale: 1 KB/s is near the bottom, 100 MB/s at the top.
         let net = (((s.down + s.up).max(1.0).log10() - 3.0) / 5.0).clamp(0.0, 1.0) as f32;
@@ -121,9 +137,11 @@ impl Monitor {
 
 impl Drop for Monitor {
     fn drop(&mut self) {
-        if self.query != 0 {
-            unsafe {
-                let _ = PdhCloseQuery(PDH_HQUERY(self.query as *mut _));
+        unsafe {
+            for q in [self.query, self.gpu_query] {
+                if q != 0 {
+                    let _ = PdhCloseQuery(PDH_HQUERY(q as *mut _));
+                }
             }
         }
     }

@@ -46,6 +46,8 @@ pub struct App {
     pub paused: bool,
     /// A full-screen game or video is running.
     pub busy: bool,
+    /// Repaints skipped while windows covered the text panel: 0 none, 1 the panel, 2 everything.
+    pub stale: u8,
     pub light_key: [i32; 5],
     pub scene_key: Vec<Pic>,
     pub scene_offset: usize,
@@ -110,6 +112,7 @@ impl App {
             reminder_at: 0,
             last_moment: None,
             renderer: None,
+            stale: 0,
             look_key: String::new(),
             monitors: vec![],
             work: vec![],
@@ -336,6 +339,7 @@ impl App {
             clock_design: self.s.clock_design.clone(),
             info_style: self.s.info_style.clone(),
             date_style: self.s.date_style.clone(),
+            reminder_style: self.s.reminder_style.clone(),
         };
         // A calligraphy scene brings its own text colour; on a light one the text is dark and
         // nothing dark goes behind it. The accent stays the one the user picked — on a light
@@ -487,20 +491,22 @@ impl App {
         };
 
         let (mut kind, mut arabic, mut meaning, mut source, mut meaning_bn) = (String::new(), String::new(), String::new(), String::new(), false);
+        let mut kind_id = String::new();
         if let Some((k, it)) = &self.reminder {
             kind = i18n::kind(l, k).to_string();
+            kind_id = it.kind.to_string();
             if !(it.kind == "hadith" && it.ar.chars().count() > 280) {
-                arabic = it.ar.clone();
+                arabic = it.ar.to_string();
             }
             meaning = match self.s.meaning.as_str() {
                 "none" => String::new(),
                 "bn" if !it.bn.is_empty() => {
                     meaning_bn = true;
-                    it.bn.clone()
+                    it.bn.to_string()
                 }
-                _ => it.en.clone(),
+                _ => it.en.to_string(),
             };
-            source = if it.grade.is_empty() { it.reference.clone() } else { format!("{} · {}", it.reference, it.grade) };
+            source = if it.grade.is_empty() { it.reference.to_string() } else { format!("{} · {}", it.reference, it.grade) };
         }
 
         let fasting = if self.s.show_fasting { self.fasting_line(days, now) } else { None };
@@ -555,6 +561,7 @@ impl App {
             progress,
             special,
             kind,
+            kind_id,
             arabic,
             meaning,
             meaning_bn,

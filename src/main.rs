@@ -39,6 +39,7 @@ use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::{InitCommonControlsEx, ICC_BAR_CLASSES, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX};
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
+use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const TIMER_MINUTE: usize = 1;
@@ -46,6 +47,7 @@ const TIMER_SECOND: usize = 2;
 const TIMER_MONITOR: usize = 3;
 const TIMER_ATTACH: usize = 4;
 const TIMER_RETRY: usize = 5;
+const TIMER_PEEK: usize = 6;
 const WM_TIMES: u32 = WM_APP + 2;
 const WM_SHOW_SETTINGS: u32 = WM_APP + 3;
 const WM_EVENTS: u32 = WM_APP + 4;
@@ -72,6 +74,29 @@ pub fn log(line: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(f, "{} {line}", times::utc_seconds());
     }
+}
+
+/// After a big repaint, hands the pages it touched back to Windows. They are paged back in only
+/// if used again, so Task Manager shows what the wallpaper really needs between repaints.
+pub fn trim_memory() {
+    use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+    unsafe {
+        let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
+}
+
+/// After something big is freed (the Settings window): gives the heaps' free space back to
+/// Windows, then trims.
+pub fn release_memory() {
+    use windows::Win32::System::Memory::{GetProcessHeaps, HeapCompact, HEAP_NONE};
+    unsafe {
+        let mut heaps = [HANDLE::default(); 64];
+        let n = (GetProcessHeaps(&mut heaps) as usize).min(heaps.len());
+        for h in &heaps[..n] {
+            let _ = HeapCompact(*h, HEAP_NONE);
+        }
+    }
+    trim_memory();
 }
 
 fn ctl() -> HWND {
@@ -223,6 +248,123 @@ fn ms_to_next_minute() -> u32 {
     let s = times::utc_seconds();
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_millis()).unwrap_or(0);
     (60 - (s % 60) as u32) * 1000 - ms + 50
+}
+
+// ---------- not drawing what nobody can see ----------
+
+/// Every monitor's work area in screen coordinates, in the same order as `monitors()`.
+fn screen_work_areas() -> Vec<RECT> {
+    unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> BOOL {
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(m, &mut info).as_bool() {
+            (*(out.0 as *mut Vec<RECT>)).push(info.rcWork);
+        }
+        BOOL(1)
+    }
+    let mut v: Vec<RECT> = vec![];
+    unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut v as *mut _ as isize));
+    }
+    v
+}
+
+/// Is the text panel hidden behind ordinary windows (maximised, or as big as the screen) on
+/// every screen that shows it? Then the clock and system strip don't need redrawing.
+/// Anything see-through, layered, cloaked or minimised never counts, so a wrong guess can only
+/// mean "keep drawing".
+fn panel_hidden() -> bool {
+    struct Look {
+        targets: Vec<RECT>,
+        covered: Vec<bool>,
+    }
+    unsafe extern "system" fn each(h: HWND, lp: LPARAM) -> BOOL {
+        let look = &mut *(lp.0 as *mut Look);
+        if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() || h == ctl() || h == wall() {
+            return BOOL(1);
+        }
+        let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+        if ex & (WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) != 0 {
+            return BOOL(1);
+        }
+        let mut cloaked = 0u32;
+        let _ = windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(h, windows::Win32::Graphics::Dwm::DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, 4);
+        if cloaked != 0 {
+            return BOOL(1);
+        }
+        let mut class = [0u16; 32];
+        let n = GetClassNameW(h, &mut class) as usize;
+        let class = String::from_utf16_lossy(&class[..n]);
+        if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+            return BOOL(1);
+        }
+        let mut r = RECT::default();
+        if windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(h, windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS, &mut r as *mut _ as *mut _, std::mem::size_of::<RECT>() as u32).is_err() {
+            let _ = GetWindowRect(h, &mut r);
+        }
+        for (t, c) in look.targets.iter().zip(look.covered.iter_mut()) {
+            if r.left <= t.left + 2 && r.top <= t.top + 2 && r.right >= t.right - 2 && r.bottom >= t.bottom - 2 {
+                *c = true;
+            }
+        }
+        BOOL(if look.covered.iter().all(|c| *c) { 0 } else { 1 })
+    }
+    let panels = with_app(|a| a.panel_monitors()).unwrap_or_default();
+    let works = screen_work_areas();
+    let targets: Vec<RECT> = panels.iter().filter_map(|&i| works.get(i).copied()).collect();
+    if targets.is_empty() {
+        return false;
+    }
+    let mut look = Look { covered: vec![false; targets.len()], targets };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut look as *mut _ as isize));
+    }
+    look.covered.iter().all(|c| *c)
+}
+
+/// Remembers a skipped repaint (1 = the panel, 2 = everything) and watches for the desktop
+/// coming back.
+fn skip_repaint(level: u8) {
+    with_app(|a| a.stale = a.stale.max(level));
+    unsafe {
+        SetTimer(Some(ctl()), TIMER_PEEK, 2000, None);
+    }
+}
+
+/// If repaints were skipped and the panel can be seen again, draws what was missed.
+fn catch_up() {
+    let stale = with_app(|a| a.stale).unwrap_or(0);
+    if stale == 0 || panel_hidden() {
+        return;
+    }
+    with_app(|a| a.stale = 0);
+    unsafe {
+        let _ = KillTimer(Some(ctl()), TIMER_PEEK);
+    }
+    if stale >= 2 {
+        invalidate(None);
+    } else {
+        with_app(|a| a.panel_rects()).unwrap_or_default().into_iter().for_each(|r| invalidate(Some(r)));
+    }
+}
+
+/// Windows coming to the front, being minimised or moved: the desktop may be visible again.
+unsafe extern "system" fn window_event(_: HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
+    if with_app(|a| a.stale).unwrap_or(0) > 0 {
+        catch_up();
+    }
+}
+
+fn watch_windows() {
+    const FOREGROUND: u32 = 0x0003;
+    const MOVESIZEEND: u32 = 0x000B;
+    const MINIMIZESTART: u32 = 0x0016;
+    const MINIMIZEEND: u32 = 0x0017;
+    const OUTOFCONTEXT_SKIPOWN: u32 = 0x0002; // WINEVENT_OUTOFCONTEXT (0) | WINEVENT_SKIPOWNPROCESS
+    unsafe {
+        for (a, b) in [(FOREGROUND, FOREGROUND), (MOVESIZEEND, MOVESIZEEND), (MINIMIZESTART, MINIMIZEEND)] {
+            let _ = SetWinEventHook(a, b, None, Some(window_event), 0, 0, OUTOFCONTEXT_SKIPOWN);
+        }
+    }
 }
 
 /// Is a full-screen game, video or presentation running?
@@ -386,6 +528,10 @@ fn tick() {
     });
     if let Some((rects, tip)) = plan {
         tray::tip(ctl(), &tip);
+        if panel_hidden() {
+            skip_repaint(if rects.is_some() { 1 } else { 2 });
+            return;
+        }
         match rects {
             Some(rs) => rs.into_iter().for_each(|r| invalidate(Some(r))),
             None => invalidate(None),
@@ -527,6 +673,10 @@ unsafe extern "system" fn wall_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             })
             .flatten();
             let _ = EndPaint(hwnd, &ps);
+            let r = ps.rcPaint;
+            if (r.right - r.left) as i64 * (r.bottom - r.top) as i64 > 600_000 {
+                trim_memory();
+            }
             if let Some(rs) = moved {
                 for r in rs {
                     let _ = InvalidateRect(Some(hwnd), Some(&r), false);
@@ -564,12 +714,18 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                     tick();
                 }
                 TIMER_SECOND => {
-                    if with_app(|a| !a.busy && !a.paused).unwrap_or(false) {
+                    if with_app(|a| !a.busy && !a.paused).unwrap_or(false) && panel_hidden() {
+                        skip_repaint(1);
+                    } else if with_app(|a| !a.busy && !a.paused).unwrap_or(false) {
                         let rs = with_app(|a| a.renderer.as_ref().map(|r| r.clock_rect.borrow().values().copied().collect::<Vec<_>>())).flatten().unwrap_or_default();
                         rs.into_iter().for_each(|r| invalidate(Some(r)));
                     }
                 }
                 TIMER_MONITOR => {
+                    if panel_hidden() {
+                        skip_repaint(1);
+                        return LRESULT(0);
+                    }
                     let r = with_app(|a| {
                         if a.busy || a.paused || (a.s.battery_saver && app::on_battery()) {
                             return None;
@@ -586,6 +742,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         }
                     }
                 }
+                TIMER_PEEK => catch_up(),
                 TIMER_ATTACH => {
                     let _ = KillTimer(Some(hwnd), TIMER_ATTACH);
                     attach();
@@ -865,6 +1022,7 @@ fn main() -> windows::core::Result<()> {
         ensure_times();
         attach();
         arm_timers();
+        watch_windows();
         SetTimer(Some(ctl), TIMER_MINUTE, ms_to_next_minute(), None);
         if has("--welcome") {
             tray::notify(ctl, "Miqaat Wallpaper is on your desktop", "Right-click the moon icon in the taskbar corner for settings.");

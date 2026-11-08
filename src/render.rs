@@ -6,14 +6,14 @@
 //! decoded once, at that monitor's size, and kept as one bitmap.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use windows::core::{w, Interface, Result, HSTRING};
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, RECT};
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::DirectWrite::*;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-use windows::Win32::Graphics::Gdi::HDC;
+use windows::Win32::Graphics::Gdi::{CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, SelectObject, HDC};
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows_numerics::{Matrix3x2, Vector2};
@@ -45,6 +45,8 @@ pub struct Frame {
     pub progress: f32,
     pub special: Option<(String, String)>,
     pub kind: String,
+    /// The reminder's kind as stored (quran, hadith, dua, dhikr, istighfar, durood), for its icon.
+    pub kind_id: String,
     pub arabic: String,
     pub meaning: String,
     pub meaning_bn: bool,
@@ -100,6 +102,8 @@ pub struct Style {
     /// lines, chips, cards or strip
     pub info_style: String,
     pub date_style: String,
+    /// classic, accent, frame, marks, chips, minimal, glass or side
+    pub reminder_style: String,
 }
 
 /// A built-in font as a DirectWrite collection, and its family name as DirectWrite sees it
@@ -107,8 +111,12 @@ pub struct Style {
 pub fn load_font(dwrite: &IDWriteFactory5, loader: &IDWriteInMemoryFontFileLoader, f: &crate::assets::Font) -> Result<(IDWriteFontCollection1, HSTRING)> {
     unsafe {
         let builder: IDWriteFontSetBuilder1 = dwrite.CreateFontSetBuilder()?.cast()?;
+        // A tiny object of our own (not the loader, which would then hold itself).
+        let owner: windows::core::IUnknown = dwrite.CreateFontSetBuilder()?.cast()?;
         for data in f.files {
-            let file = loader.CreateInMemoryFontFileReference(dwrite, data.as_ptr() as _, data.len() as u32, None::<&windows::core::IUnknown>)?;
+            // With an owner object DirectWrite reads the font straight from the exe instead of
+            // copying it. The bytes are static; the owner only has to stay alive.
+            let file = loader.CreateInMemoryFontFileReference(dwrite, data.as_ptr() as _, data.len() as u32, Some(&owner))?;
             builder.AddFontFile(&file)?;
         }
         let coll = dwrite.CreateFontCollectionFromFontSet(&builder.CreateFontSet()?)?;
@@ -163,7 +171,18 @@ pub struct Renderer {
     /// Rectangles found during the last paint (client coordinates), for partial repaints.
     pub clock_rect: RefCell<BTreeMap<usize, RECT>>,
     pub strip_rect: RefCell<BTreeMap<usize, RECT>>,
+    /// Text formats and layouts kept between paints, so a small repaint (the seconds, the system
+    /// strip) only lays out the text that changed. Whatever a full paint didn't use is dropped.
+    formats: RefCell<HashMap<FormatKey, IDWriteTextFormat>>,
+    layouts: RefCell<HashMap<LayoutKey, (IDWriteTextLayout, f32)>>,
+    used_formats: RefCell<HashSet<FormatKey>>,
+    used_layouts: RefCell<HashSet<LayoutKey>>,
 }
+
+/// (font, size, weight, right-to-left, no wrapping)
+type FormatKey = (char, u32, i32, bool, bool);
+/// (text, format, width, align, letter spacing)
+type LayoutKey = (String, usize, u32, u8, u32);
 
 fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r, g, b, a }
@@ -175,6 +194,105 @@ fn rect(l: f32, t: f32, r: f32, b: f32) -> D2D_RECT_F {
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
+}
+
+/// What a piece of the reminder group is, so each reminder style can place and dress it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Role {
+    /// Not part of the reminder (the special-day lines above it).
+    Other,
+    Pad,
+    Label,
+    Arabic,
+    Meaning,
+    Ref,
+    /// Room for the kind and reference tags (chips style).
+    Chips,
+    ChipKind,
+    ChipRef,
+    /// Room for the meaning and Arabic side by side.
+    Side,
+    SideArabic,
+    SideMeaning,
+    /// The line with a star above the reference (verse marks style).
+    Divider,
+    /// The hairline above the reference (glass card style).
+    Separator,
+}
+
+/// Sizes that follow from the reminder style.
+struct ReminderShape {
+    style: &'static str,
+    pad_x: f32,
+    pad_y: f32,
+    /// Room for the accent line.
+    indent: f32,
+    text_w: f32,
+    align: u8,
+    side_right: bool,
+    corner: f32,
+    behind_glass: bool,
+    u: f32,
+}
+
+impl ReminderShape {
+    fn of(st: &Style, rem_w: f32, align: u8, u: f32) -> Self {
+        let style = match st.reminder_style.as_str() {
+            "accent" => "accent",
+            "frame" => "frame",
+            "marks" => "marks",
+            "chips" => "chips",
+            "minimal" => "minimal",
+            "glass" => "glass",
+            "side" => "side",
+            _ => "classic",
+        };
+        let (pad_x, pad_y) = match style {
+            "frame" => (2.0 * u, 1.6 * u),
+            "glass" => (1.6 * u, 1.3 * u),
+            _ => (0.0, 0.0),
+        };
+        let indent = if style == "accent" { 1.6 * u } else { 0.0 };
+        let align = if matches!(style, "frame" | "marks") { 1 } else { align };
+        ReminderShape {
+            style,
+            pad_x,
+            pad_y,
+            indent,
+            text_w: (rem_w - 2.0 * pad_x - indent).max(4.0 * u),
+            align,
+            side_right: align == 2,
+            corner: st.corner_r * u,
+            behind_glass: st.behind == "glass",
+            u,
+        }
+    }
+
+    /// How far in from the reminder's left edge a piece starts.
+    fn x_off(&self, role: Role) -> f32 {
+        let lead = if self.side_right { 0.0 } else { self.indent };
+        let icon = if self.style == "accent" && role == Role::Label && !self.side_right { 1.3 * self.u } else { 0.0 };
+        self.pad_x + lead + icon
+    }
+}
+
+/// A small eight-pointed star (frame corners, verse-marks divider).
+fn star(factory: &ID2D1Factory, cx: f32, cy: f32, r: f32) -> Result<ID2D1PathGeometry> {
+    unsafe {
+        let geo = factory.CreatePathGeometry()?;
+        let sink = geo.Open()?;
+        let pt = |k: usize| {
+            let a = k as f32 * std::f32::consts::PI / 8.0 - std::f32::consts::FRAC_PI_2;
+            let rr = if k.is_multiple_of(2) { r } else { r * 0.5 };
+            Vector2 { X: cx + rr * a.cos(), Y: cy + rr * a.sin() }
+        };
+        sink.BeginFigure(pt(0), D2D1_FIGURE_BEGIN_FILLED);
+        let rest: Vec<Vector2> = (1..16).map(pt).collect();
+        sink.AddLines(&rest);
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink.Close()?;
+        Ok(geo)
+    }
 }
 
 /// A piece of text placed on the wallpaper.
@@ -230,7 +348,7 @@ impl Renderer {
     pub fn new(photos: &[(Photo, u32, u32)], effect: &str, grain: bool, glass: bool, glass_blur: u32, font_ar: &str, font_bn: &str, font_en: &str, font_clock: &str) -> Result<Self> {
         unsafe {
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let dwrite: IDWriteFactory5 = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED)?;
+            let dwrite: IDWriteFactory5 = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let loader = dwrite.CreateInMemoryFontFileLoader()?;
             dwrite.RegisterFontFileLoader(&loader)?;
             let pick = |list: &'static [crate::assets::Font], name: &str| list.iter().find(|f| f.name == name).unwrap_or(&list[0]);
@@ -258,7 +376,13 @@ impl Renderer {
             let mut blurred = vec![];
             for (src, w, h) in &keys {
                 let (photo, soft) = load_photo(src, *w, *h, effect, grain, glass, glass_blur)?;
-                decoded.push(photo);
+                // Kept as 3 bytes a pixel (the photo has no transparency): a quarter less memory.
+                // Each paint converts only the part it draws (see `picture`).
+                let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+                let conv = wic.CreateFormatConverter()?;
+                conv.Initialize(&photo, &GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeMedianCut)?;
+                drop(photo);
+                decoded.push(wic.CreateBitmapFromSource(&conv, WICBitmapCacheOnLoad)?);
                 if let Some(s) = soft {
                     blurred.push(s);
                 }
@@ -273,11 +397,26 @@ impl Renderer {
                 of_monitor,
                 clock_rect: RefCell::new(BTreeMap::new()),
                 strip_rect: RefCell::new(BTreeMap::new()),
+                formats: RefCell::new(HashMap::new()),
+                layouts: RefCell::new(HashMap::new()),
+                used_formats: RefCell::new(HashSet::new()),
+                used_layouts: RefCell::new(HashSet::new()),
             })
         }
     }
 
     fn format(&self, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, rtl: bool) -> Result<IDWriteTextFormat> {
+        self.format_wrap(which, size, weight, rtl, true)
+    }
+
+    /// A text format, made once and reused. Formats are shared, so never change one after
+    /// getting it: ask for the no-wrap kind instead.
+    fn format_wrap(&self, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, rtl: bool, wrap: bool) -> Result<IDWriteTextFormat> {
+        let key: FormatKey = (which, size.max(1.0).to_bits(), weight.0, rtl, !wrap);
+        self.used_formats.borrow_mut().insert(key);
+        if let Some(f) = self.formats.borrow().get(&key) {
+            return Ok(f.clone());
+        }
         let (coll, name) = match which {
             'a' => &self.fonts.ar,
             'b' => &self.fonts.bn,
@@ -289,13 +428,32 @@ impl Renderer {
             if rtl {
                 f.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)?;
             }
-            f.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            f.SetWordWrapping(if wrap { DWRITE_WORD_WRAPPING_WRAP } else { DWRITE_WORD_WRAPPING_NO_WRAP })?;
+            self.formats.borrow_mut().insert(key, f.clone());
             Ok(f)
         }
     }
 
+    /// Starts a paint that redraws whole panels: afterwards, cached text it didn't use is dropped.
+    fn begin_full(&self) {
+        self.used_formats.borrow_mut().clear();
+        self.used_layouts.borrow_mut().clear();
+    }
+
+    fn end_full(&self) {
+        let lu = self.used_layouts.borrow();
+        self.layouts.borrow_mut().retain(|k, _| lu.contains(k));
+        let fu = self.used_formats.borrow();
+        self.formats.borrow_mut().retain(|k, _| fu.contains(k));
+    }
+
     /// Lays out `text` in a box `width` wide. `align`: 0 left, 1 centre, 2 right (on screen).
     fn piece(&self, text: &str, f: &IDWriteTextFormat, width: f32, align: u8, spacing: f32, color: D2D1_COLOR_F) -> Result<Piece> {
+        let key: LayoutKey = (text.to_string(), f.as_raw() as usize, width.max(1.0).to_bits(), align, spacing.to_bits());
+        self.used_layouts.borrow_mut().insert(key.clone());
+        if let Some((l, h)) = self.layouts.borrow().get(&key) {
+            return Ok(Piece { layout: l.clone(), x: 0.0, y: 0.0, w: width, h: *h, color });
+        }
         unsafe {
             let rtl = f.GetReadingDirection() == DWRITE_READING_DIRECTION_RIGHT_TO_LEFT;
             let l = self.dwrite.CreateTextLayout(&wide(text), f, width.max(1.0), 10000.0)?;
@@ -311,6 +469,7 @@ impl Renderer {
             }
             let mut m = DWRITE_TEXT_METRICS::default();
             l.GetMetrics(&mut m)?;
+            self.layouts.borrow_mut().insert(key, (l.clone(), m.height));
             Ok(Piece { layout: l, x: 0.0, y: 0.0, w: width, h: m.height, color })
         }
     }
@@ -336,8 +495,7 @@ impl Renderer {
         let n = text.encode_utf16().count();
         let mut s = size;
         loop {
-            let f = self.format(which, s, weight, false)?;
-            unsafe { f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)? };
+            let f = self.format_wrap(which, s, weight, false, false)?;
             let mut widest = 0.0f32;
             for d in ['0', '8'] {
                 let p = self.piece(&swap(d), &f, width, align, 0.0, color)?;
@@ -363,8 +521,7 @@ impl Renderer {
     /// A single line of text that does not wrap, with equal-width digits.
     #[allow(clippy::too_many_arguments)]
     fn label_piece(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, rtl: bool, align: u8, width: f32, color: D2D1_COLOR_F) -> Result<Piece> {
-        let fmt = self.format(which, size, weight, rtl)?;
-        unsafe { fmt.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)? };
+        let fmt = self.format_wrap(which, size, weight, rtl, false)?;
         let p = self.piece(text, &fmt, width.max(1.0), align, 0.0, color)?;
         unsafe {
             let ty = self.dwrite.CreateTypography()?;
@@ -702,6 +859,200 @@ impl Renderer {
         Ok(())
     }
 
+    /// Draws what a reminder style adds around the text (lines, frame, tags, card) and puts the
+    /// hand-placed text (`extras`) where it belongs. The text itself is drawn afterwards.
+    #[allow(clippy::too_many_arguments)]
+    fn reminder_dressing(&self, t: &ID2D1RenderTarget, sh: &ReminderShape, placed: &[Piece], roles: &[Role], extras: &mut [(Role, Piece)], rem_x: f32, f: &Frame, tone: [f32; 3], acc: D2D1_COLOR_F, u: f32) -> Result<()> {
+        let mine: Vec<&Piece> = placed.iter().zip(roles).filter(|(_, r)| **r != Role::Other).map(|(p, _)| p).collect();
+        let (Some(top), Some(bottom)) = (mine.iter().map(|p| p.y).reduce(f32::min), mine.iter().map(|p| p.y + p.h).reduce(f32::max)) else {
+            return Ok(());
+        };
+        let find = |r: Role| placed.iter().zip(roles).find(|(_, x)| **x == r).map(|(p, _)| p);
+        let ink = |a: f32| rgba(tone[0], tone[1], tone[2], a);
+        let tint = |a: f32| rgba(acc.r, acc.g, acc.b, a);
+        let rem_w = sh.text_w + 2.0 * sh.pad_x + sh.indent;
+        let v = |x: f32, y: f32| Vector2 { X: x, Y: y };
+        unsafe {
+            let brush = |c: D2D1_COLOR_F| t.CreateSolidColorBrush(&c, None);
+            match sh.style {
+                "accent" => {
+                    let x = if sh.side_right { rem_x + rem_w - 0.25 * u } else { rem_x + 0.25 * u };
+                    t.DrawLine(v(x, top + 0.1 * u), v(x, bottom), &brush(acc)?, 0.18 * u, None);
+                    if let Some(l) = find(Role::Label) {
+                        let s = 0.95 * u;
+                        let ix = if sh.side_right { l.x + l.w + 0.35 * u } else { l.x - 1.3 * u };
+                        self.kind_icon(t, &f.kind_id, ix, l.y + (l.h - s) / 2.0, s, &brush(acc)?, u)?;
+                    }
+                }
+                "frame" => {
+                    let (x0, x1, y0, y1) = (rem_x + 0.3 * u, rem_x + rem_w - 0.3 * u, top, bottom);
+                    let line = brush(tint(0.5))?;
+                    let w = 0.07 * u;
+                    let mid = (x0 + x1) / 2.0;
+                    let mut gap = 0.0;
+                    if let Some((_, l)) = extras.iter_mut().find(|(r, _)| *r == Role::Label) {
+                        gap = self.width(l)? / 2.0 + 0.8 * u;
+                        l.x = rem_x + sh.pad_x;
+                        l.y = y0 - l.h / 2.0;
+                    }
+                    if gap > 0.0 {
+                        t.DrawLine(v(x0, y0), v(mid - gap, y0), &line, w, None);
+                        t.DrawLine(v(mid + gap, y0), v(x1, y0), &line, w, None);
+                    } else {
+                        t.DrawLine(v(x0, y0), v(x1, y0), &line, w, None);
+                    }
+                    t.DrawLine(v(x1, y0), v(x1, y1), &line, w, None);
+                    t.DrawLine(v(x1, y1), v(x0, y1), &line, w, None);
+                    t.DrawLine(v(x0, y1), v(x0, y0), &line, w, None);
+                    let fill = brush(acc)?;
+                    for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+                        t.FillGeometry(&star(&self.factory, x, y, 0.55 * u)?, &fill, None);
+                    }
+                }
+                "marks" => {
+                    if let Some(d) = find(Role::Divider) {
+                        let (cx, cy) = (d.x + d.w / 2.0, d.y + d.h / 2.0);
+                        let half = d.w * 0.3;
+                        let line = brush(tint(0.45))?;
+                        t.DrawLine(v(cx - half, cy), v(cx - 0.7 * u, cy), &line, 0.07 * u, None);
+                        t.DrawLine(v(cx + 0.7 * u, cy), v(cx + half, cy), &line, 0.07 * u, None);
+                        t.FillGeometry(&star(&self.factory, cx, cy, 0.38 * u)?, &brush(acc)?, None);
+                    }
+                }
+                "glass" => {
+                    let rad = sh.corner.max(0.4 * u);
+                    let rr = D2D1_ROUNDED_RECT { rect: rect(rem_x, top, rem_x + rem_w, bottom), radiusX: rad, radiusY: rad };
+                    if !sh.behind_glass {
+                        t.FillRoundedRectangle(&rr, &brush(ink(0.06))?);
+                    }
+                    t.DrawRoundedRectangle(&rr, &brush(ink(0.12))?, 0.06 * u, None);
+                    if let Some(sp) = find(Role::Separator) {
+                        let y = sp.y + sp.h / 2.0;
+                        t.DrawLine(v(rem_x + sh.pad_x, y), v(rem_x + rem_w - sh.pad_x, y), &brush(ink(0.12))?, 0.05 * u, None);
+                    }
+                }
+                "chips" => {
+                    if let Some(row) = find(Role::Chips) {
+                        let (row_x, row_y, row_w, row_h) = (row.x, row.y, row.w, row.h);
+                        let wk = match extras.iter().find(|(r, _)| *r == Role::ChipKind) {
+                            Some((_, p)) => self.width(p)?,
+                            None => 0.0,
+                        };
+                        let wr = match extras.iter().find(|(r, _)| *r == Role::ChipRef) {
+                            Some((_, p)) => self.width(p)?,
+                            None => 0.0,
+                        };
+                        let kw = wk + 2.6 * u;
+                        let rw = (wr + 1.4 * u).min(row_w);
+                        let ch = extras.iter().map(|(_, p)| p.h).fold(0.0f32, f32::max) + 0.5 * u;
+                        let one = row_h < ch * 1.5;
+                        let (kx, ky, rx, ry) = match (sh.align, one) {
+                            (2, true) => (row_x + row_w - kw, row_y, row_x + row_w - kw - 0.8 * u - rw, row_y),
+                            (2, false) => (row_x + row_w - kw, row_y, row_x + row_w - rw, row_y + ch + 0.5 * u),
+                            (1, true) => {
+                                let st = row_x + (row_w - kw - 0.8 * u - rw) / 2.0;
+                                (st, row_y, st + kw + 0.8 * u, row_y)
+                            }
+                            (1, false) => (row_x + (row_w - kw) / 2.0, row_y, row_x + (row_w - rw) / 2.0, row_y + ch + 0.5 * u),
+                            (_, true) => (row_x, row_y, row_x + row_w - rw, row_y),
+                            (_, false) => (row_x, row_y, row_x, row_y + ch + 0.5 * u),
+                        };
+                        let pill = |x: f32, y: f32, w: f32| D2D1_ROUNDED_RECT { rect: rect(x, y, x + w, y + ch), radiusX: ch / 2.0, radiusY: ch / 2.0 };
+                        t.FillRoundedRectangle(&pill(kx, ky, kw), &brush(tint(0.16))?);
+                        t.DrawRoundedRectangle(&pill(kx, ky, kw), &brush(tint(0.4))?, 0.06 * u, None);
+                        t.FillRoundedRectangle(&pill(rx, ry, rw), &brush(ink(0.07))?);
+                        t.DrawRoundedRectangle(&pill(rx, ry, rw), &brush(ink(0.15))?, 0.06 * u, None);
+                        let s = 0.8 * u;
+                        self.kind_icon(t, &f.kind_id, kx + 0.6 * u, ky + (ch - s) / 2.0, s, &brush(acc)?, u)?;
+                        for (r, p) in extras.iter_mut() {
+                            match r {
+                                Role::ChipKind => {
+                                    p.x = kx + 1.75 * u;
+                                    p.y = ky + (ch - p.h) / 2.0;
+                                }
+                                Role::ChipRef => {
+                                    p.x = rx + 0.7 * u;
+                                    p.y = ry + (ch - p.h) / 2.0;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                "side" => {
+                    if let Some(row) = find(Role::Side) {
+                        let mw = (sh.text_w - 1.6 * u) * 0.45;
+                        let (rx, ry, rh) = (row.x, row.y, row.h);
+                        let rule_x = rx + mw + 1.8 * u;
+                        let mut ar_h = rh;
+                        for (r, p) in extras.iter_mut() {
+                            match r {
+                                Role::SideMeaning => {
+                                    p.x = rx;
+                                    p.y = ry + (rh - p.h) / 2.0;
+                                }
+                                Role::SideArabic => {
+                                    p.x = rule_x + 0.7 * u;
+                                    p.y = ry + (rh - p.h) / 2.0;
+                                    ar_h = p.h;
+                                }
+                                _ => {}
+                            }
+                        }
+                        let y0 = ry + (rh - ar_h) / 2.0;
+                        t.DrawLine(v(rule_x, y0 + 0.2 * u), v(rule_x, y0 + ar_h - 0.2 * u), &brush(tint(0.5))?, 0.07 * u, None);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// A small line icon for the reminder's kind: a book (Quran), beads (dhikr, istighfar,
+    /// durood), raised hands (dua) or a page (hadith).
+    #[allow(clippy::too_many_arguments)]
+    fn kind_icon(&self, t: &ID2D1RenderTarget, kind: &str, x: f32, y: f32, s: f32, b: &ID2D1SolidColorBrush, u: f32) -> Result<()> {
+        let w = (0.075 * u).max(1.0);
+        let v = |a: f32, c: f32| Vector2 { X: x + a * s, Y: y + c * s };
+        unsafe {
+            match kind {
+                "quran" => {
+                    let geo = self.factory.CreatePathGeometry()?;
+                    let sink = geo.Open()?;
+                    sink.BeginFigure(v(0.5, 0.25), D2D1_FIGURE_BEGIN_HOLLOW);
+                    sink.AddLines(&[v(0.08, 0.12), v(0.08, 0.82), v(0.5, 0.95), v(0.92, 0.82), v(0.92, 0.12), v(0.5, 0.25), v(0.5, 0.95)]);
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                    sink.Close()?;
+                    t.DrawGeometry(&geo, b, w, None);
+                }
+                "dua" => {
+                    for (l, r) in [(0.08f32, 0.44f32), (0.56, 0.92)] {
+                        let rr = D2D1_ROUNDED_RECT { rect: rect(x + l * s, y + 0.1 * s, x + r * s, y + 0.95 * s), radiusX: 0.18 * s, radiusY: 0.18 * s };
+                        t.DrawRoundedRectangle(&rr, b, w, None);
+                    }
+                }
+                "hadith" => {
+                    let rr = D2D1_ROUNDED_RECT { rect: rect(x + 0.15 * s, y + 0.05 * s, x + 0.85 * s, y + 0.95 * s), radiusX: 0.1 * s, radiusY: 0.1 * s };
+                    t.DrawRoundedRectangle(&rr, b, w, None);
+                    for k in 0..3 {
+                        let yy = 0.32 + k as f32 * 0.2;
+                        t.DrawLine(v(0.3, yy), v(if k == 2 { 0.55 } else { 0.7 }, yy), b, w, None);
+                    }
+                }
+                _ => {
+                    for k in 0..8 {
+                        let a = k as f32 * std::f32::consts::TAU / 9.0 - std::f32::consts::FRAC_PI_2 + 0.35;
+                        let c = v(0.5 + 0.36 * a.cos(), 0.42 + 0.36 * a.sin());
+                        t.FillEllipse(&D2D1_ELLIPSE { point: c, radiusX: 0.085 * s, radiusY: 0.085 * s }, b);
+                    }
+                    t.DrawLine(v(0.5, 0.8), v(0.5, 1.0), b, w, None);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// How wide the laid-out text actually is.
     fn width(&self, p: &Piece) -> Result<f32> {
         let mut m = DWRITE_TEXT_METRICS::default();
@@ -746,36 +1097,88 @@ impl Renderer {
                 ..Default::default()
             };
             let t = self.factory.CreateDCRenderTarget(&props)?;
-            t.BindDC(hdc, &area)?;
-            t.BeginDraw();
-            let base = Matrix3x2::translation(-area.left as f32, -area.top as f32);
-            t.SetTransform(&base);
-            t.Clear(Some(&rgba(0.04, 0.05, 0.07, 1.0)));
             let rt: ID2D1RenderTarget = t.cast()?;
+            // Anything bigger than the clock or the system strip redraws the whole panel, so it
+            // may clean the text cache. (The seconds and the strip only add to it.)
+            let inside = |r: &RECT| area.left >= r.left && area.top >= r.top && area.right <= r.right && area.bottom <= r.bottom;
+            let small = self.clock_rect.borrow().values().any(inside) || self.strip_rect.borrow().values().any(inside);
+            let full = !small;
+            if full {
+                self.begin_full();
+            }
+            // One monitor at a time: the render target's working bitmap is the size of what it
+            // draws, so a full repaint never needs a bitmap as wide as all the screens.
             for (i, m) in monitors.iter().enumerate() {
-                if m.right <= area.left || m.left >= area.right || m.bottom <= area.top || m.top >= area.bottom {
+                let part = RECT { left: area.left.max(m.left), top: area.top.max(m.top), right: area.right.min(m.right), bottom: area.bottom.min(m.bottom) };
+                if part.right <= part.left || part.bottom <= part.top {
                     continue;
                 }
-                self.picture(&rt, i, *m, f, &base)?;
+                t.BindDC(hdc, &part)?;
+                t.BeginDraw();
+                let base = Matrix3x2::translation(-part.left as f32, -part.top as f32);
+                t.SetTransform(&base);
+                t.Clear(Some(&rgba(0.04, 0.05, 0.07, 1.0)));
+                self.picture(&rt, i, *m, f, &base, part)?;
                 if panels.contains(&i) {
                     self.panel(&rt, i, work.get(i).copied().unwrap_or(*m), f, st)?;
                 }
+                t.EndDraw(None, None)?;
             }
-            t.EndDraw(None, None)?;
+            if full {
+                self.end_full();
+            }
+            // Direct2D keeps the working bitmap of the last draw for the next one. After a big
+            // paint that is several MB held for nothing, so draw once more into a 1×1 bitmap to
+            // swap it for a tiny one.
+            if (area.right - area.left) as i64 * (area.bottom - area.top) as i64 > 600_000 {
+                let dc = CreateCompatibleDC(Some(hdc));
+                let bmp = CreateCompatibleBitmap(hdc, 1, 1);
+                let old = SelectObject(dc, bmp.into());
+                if t.BindDC(dc, &RECT { left: 0, top: 0, right: 1, bottom: 1 }).is_ok() {
+                    t.BeginDraw();
+                    let _ = t.EndDraw(None, None);
+                }
+                SelectObject(dc, old);
+                let _ = DeleteObject(bmp.into());
+                let _ = DeleteDC(dc);
+            }
         }
         Ok(())
     }
 
-    /// The photo with the drift zoom and the light of the hour.
-    fn picture(&self, t: &ID2D1RenderTarget, i: usize, m: RECT, f: &Frame, base: &Matrix3x2) -> Result<()> {
+    /// The photo with the drift zoom and the light of the hour. Only the part of the photo
+    /// under `area` is turned into a bitmap, so a small repaint (clock, system strip) doesn't
+    /// copy the whole picture.
+    #[allow(clippy::too_many_arguments)]
+    fn picture(&self, t: &ID2D1RenderTarget, i: usize, m: RECT, f: &Frame, base: &Matrix3x2, area: RECT) -> Result<()> {
         unsafe {
-            let photo = t.CreateBitmapFromWicBitmap(&self.photos[self.of_monitor.get(i).copied().unwrap_or(0)], None)?;
+            let src = &self.photos[self.of_monitor.get(i).copied().unwrap_or(0)];
+            let (mut pw, mut ph) = (0u32, 0u32);
+            src.GetSize(&mut pw, &mut ph)?;
+            // The painted part of this monitor, in photo pixels (before the zoom).
+            let (l, tp, r, b) = (area.left.max(m.left), area.top.max(m.top), area.right.min(m.right), area.bottom.min(m.bottom));
+            let (cx, cy) = ((m.left + m.right) as f32 / 2.0, (m.top + m.bottom) as f32 / 2.0);
+            let z = f.zoom.max(0.01);
+            let back = |x: i32, c: f32| c + (x as f32 - c) / z;
+            let x0 = ((back(l, cx) - m.left as f32).floor() as i32 - 2).clamp(0, pw as i32);
+            let y0 = ((back(tp, cy) - m.top as f32).floor() as i32 - 2).clamp(0, ph as i32);
+            let x1 = ((back(r, cx) - m.left as f32).ceil() as i32 + 2).clamp(0, pw as i32);
+            let y1 = ((back(b, cy) - m.top as f32).ceil() as i32 + 2).clamp(0, ph as i32);
             let dst = rect(m.left as f32, m.top as f32, m.right as f32, m.bottom as f32);
-            let c = Vector2 { X: (m.left + m.right) as f32 / 2.0, Y: (m.top + m.bottom) as f32 / 2.0 };
+            let c = Vector2 { X: cx, Y: cy };
             t.PushAxisAlignedClip(&dst, D2D1_ANTIALIAS_MODE_ALIASED);
-            t.SetTransform(&(Matrix3x2::scale_around(f.zoom, f.zoom, c) * base));
-            t.DrawBitmap(&photo, Some(&dst), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
-            t.SetTransform(base);
+            if x1 > x0 && y1 > y0 {
+                let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+                let clip = wic.CreateBitmapClipper()?;
+                clip.Initialize(src, &WICRect { X: x0, Y: y0, Width: x1 - x0, Height: y1 - y0 })?;
+                let piece = wic.CreateFormatConverter()?;
+                piece.Initialize(&clip, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeMedianCut)?;
+                let photo = t.CreateBitmapFromWicBitmap(&piece, None)?;
+                let to = rect((m.left + x0) as f32, (m.top + y0) as f32, (m.left + x1) as f32, (m.top + y1) as f32);
+                t.SetTransform(&(Matrix3x2::scale_around(f.zoom, f.zoom, c) * base));
+                t.DrawBitmap(&photo, Some(&to), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+                t.SetTransform(base);
+            }
             if f.light.dark > 0.001 {
                 t.FillRectangle(&dst, &t.CreateSolidColorBrush(&rgba(0.0, 0.01, 0.03, f.light.dark), None)?);
             }
@@ -974,6 +1377,8 @@ impl Renderer {
         let clock_h: f32 = tops.iter().map(|(p, g)| p.h + g).sum();
         let budget = if corner || bar { f32::MAX } else { (bottom - top) - clock_h - row_h - strip_h - gaps };
         let mut rems: Vec<(Piece, f32)> = vec![]; // (piece, gap below)
+        let mut roles: Vec<Role> = vec![]; // what each of `rems` is, for the reminder styles
+        let mut extras: Vec<(Role, Piece)> = vec![]; // text placed by hand (chips, side by side, framed label)
         for level in 0..4 {
             rems.clear();
             let shrink = if level >= 1 { 0.65 } else { 1.0 };
@@ -983,18 +1388,84 @@ impl Renderer {
                     rems.push((self.piece(reference, &self.format('e', 0.72 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rem_w, align, 0.0, faint)?, 1.3 * u));
                 }
             }
+            roles.clear();
+            roles.resize(rems.len(), Role::Other);
+            extras.clear();
             if st.show_reminder && !f.kind.is_empty() {
-                rems.push((self.piece(&caps(&f.kind), &self.format(label, 0.8 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?, rem_w, align, 0.1 * u * track * if st.caps { 1.0 } else { 0.0 }, acc)?, 0.45 * u));
-                if !f.arabic.is_empty() {
+                let sh = ReminderShape::of(st, rem_w, align, u);
+                let tw = sh.text_w;
+                let ta = sh.align;
+                let push = |rems: &mut Vec<(Piece, f32)>, roles: &mut Vec<Role>, p: Piece, gap: f32, r: Role| {
+                    rems.push((p, gap));
+                    roles.push(r);
+                };
+                if sh.pad_y > 0.0 {
+                    push(&mut rems, &mut roles, self.blank(sh.pad_y, tw)?, 0.0, Role::Pad);
+                }
+                let label_fmt = self.format(label, 0.8 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?;
+                let label_sp = 0.1 * u * track * if st.caps { 1.0 } else { 0.0 };
+                match sh.style {
+                    "minimal" | "chips" => {}
+                    "frame" => extras.push((Role::Label, self.piece(&caps(&f.kind), &label_fmt, tw, 1, label_sp, acc)?)),
+                    "accent" => push(&mut rems, &mut roles, self.piece(&caps(&f.kind), &label_fmt, tw - 1.3 * u, ta, label_sp, acc)?, 0.45 * u, Role::Label),
+                    _ => push(&mut rems, &mut roles, self.piece(&caps(&f.kind), &label_fmt, tw, ta, label_sp, acc)?, 0.45 * u, Role::Label),
+                }
+                if sh.style == "chips" {
+                    // the kind and the reference as two small tags above the text
+                    let cf = self.format(label, 0.72 * u, DWRITE_FONT_WEIGHT_SEMI_BOLD, st.rtl_labels)?;
+                    let rf = self.format('e', 0.72 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?;
+                    let kp = self.piece(&f.kind, &cf, tw, 0, 0.0, acc)?;
+                    let rp = self.piece(&f.source, &rf, tw - 1.4 * u, 0, 0.0, soft)?;
+                    let (kw, rw) = (self.width(&kp)? + 2.6 * u, (self.width(&rp)? + 1.4 * u).min(tw));
+                    let ch = kp.h.max(rp.h) + 0.5 * u;
+                    let one_row = kw + rw + 0.8 * u <= tw;
+                    let row_h = if one_row { ch } else { 2.0 * ch + 0.5 * u };
+                    extras.push((Role::ChipKind, kp));
+                    extras.push((Role::ChipRef, rp));
+                    push(&mut rems, &mut roles, self.blank(row_h, tw)?, 0.6 * u, Role::Chips);
+                }
+                let ar_text = if sh.style == "marks" && f.kind_id == "quran" { format!("﴿ {} ﴾", f.arabic) } else { f.arabic.clone() };
+                let ar_size = 2.3 * u * st.ar_scale * if sh.style == "minimal" { 1.25 } else { 1.0 };
+                let ar_align = if st.ar_right && ta != 1 { 2 } else { ta };
+                let which = if f.meaning_bn { 'b' } else { 'e' };
+                let (m_size, m_color) = if sh.style == "minimal" { (0.95 * u, faint) } else { (1.05 * u, soft) };
+                let side = sh.style == "side" && !f.arabic.is_empty() && !f.meaning.is_empty() && level < 3;
+                if side {
+                    // meaning on one side, Arabic on the other, in one row
+                    let mw = (tw - 1.6 * u) * 0.45;
+                    let aw = tw - 1.6 * u - mw;
                     let max = if bar { 5.2 * u } else { 7.5 * u } * shrink;
-                    rems.push((self.fitted(&f.arabic, 'a', 2.3 * u * st.ar_scale, DWRITE_FONT_WEIGHT_NORMAL, true, rem_w, max, if st.ar_right { 2 } else { align }, white)?, 0.45 * u));
+                    let ap = self.fitted(&ar_text, 'a', ar_size * 0.92, DWRITE_FONT_WEIGHT_NORMAL, true, aw - 0.9 * u, max, 2, white)?;
+                    let mp = self.fitted(&f.meaning, which, m_size, DWRITE_FONT_WEIGHT_LIGHT, false, mw, max, 0, m_color)?;
+                    let h = ap.h.max(mp.h);
+                    extras.push((Role::SideArabic, ap));
+                    extras.push((Role::SideMeaning, mp));
+                    push(&mut rems, &mut roles, self.blank(h, tw)?, 0.5 * u, Role::Side);
+                } else {
+                    if !f.arabic.is_empty() {
+                        let max = if bar { 5.2 * u } else { 7.5 * u } * shrink;
+                        push(&mut rems, &mut roles, self.fitted(&ar_text, 'a', ar_size, DWRITE_FONT_WEIGHT_NORMAL, true, tw, max, ar_align, white)?, 0.45 * u, Role::Arabic);
+                    }
+                    if !f.meaning.is_empty() && level < 3 {
+                        let max = if bar { 3.2 * u } else { 5.0 * u } * shrink;
+                        push(&mut rems, &mut roles, self.fitted(&f.meaning, which, m_size, DWRITE_FONT_WEIGHT_LIGHT, false, tw, max, ta, m_color)?, 0.4 * u, Role::Meaning);
+                    }
                 }
-                if !f.meaning.is_empty() && level < 3 {
-                    let which = if f.meaning_bn { 'b' } else { 'e' };
-                    let max = if bar { 3.2 * u } else { 5.0 * u } * shrink;
-                    rems.push((self.fitted(&f.meaning, which, 1.05 * u, DWRITE_FONT_WEIGHT_LIGHT, false, rem_w, max, align, soft)?, 0.4 * u));
+                if sh.style != "chips" {
+                    match sh.style {
+                        "marks" => push(&mut rems, &mut roles, self.blank(1.0 * u, tw)?, 0.3 * u, Role::Divider),
+                        "glass" => push(&mut rems, &mut roles, self.blank(0.7 * u, tw)?, 0.0, Role::Separator),
+                        _ => {}
+                    }
+                    push(&mut rems, &mut roles, self.piece(&f.source, &self.format('e', 0.78 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, tw, ta, 0.0, faint)?, 0.0, Role::Ref);
                 }
-                rems.push((self.piece(&f.source, &self.format('e', 0.78 * u, DWRITE_FONT_WEIGHT_NORMAL, false)?, rem_w, align, 0.0, faint)?, 0.0));
+                if sh.pad_y > 0.0 {
+                    // the last gap is below the reference
+                    if let Some(last) = rems.last_mut() {
+                        last.1 = 0.0;
+                    }
+                    push(&mut rems, &mut roles, self.blank(sh.pad_y * 0.8, tw)?, 0.0, Role::Pad);
+                }
             }
             if rems.iter().map(|(p, g)| p.h + g).sum::<f32>() <= budget {
                 break;
@@ -1014,11 +1485,14 @@ impl Renderer {
         }
         let mut yy = rem_bottom;
         let mut placed: Vec<Piece> = vec![];
-        for (mut p, gap) in rems.into_iter().rev() {
+        let mut placed_roles: Vec<Role> = vec![];
+        let shape = ReminderShape::of(st, rem_w, align, u);
+        for ((mut p, gap), role) in rems.into_iter().zip(roles.iter().copied()).rev() {
             yy -= p.h + gap;
-            p.x = rem_x;
+            p.x = rem_x + if role == Role::Other { 0.0 } else { shape.x_off(role) };
             p.y = yy;
             placed.push(p);
+            placed_roles.push(role);
         }
         let mut rem_top = placed.last().map(|p| p.y).unwrap_or(rem_bottom);
 
@@ -1302,7 +1776,8 @@ impl Renderer {
                 t.FillEllipse(&D2D1_ELLIPSE { point: tip, radiusX: 0.1 * u, radiusY: 0.1 * u }, &t.CreateSolidColorBrush(&acc, None)?);
             }
         }
-        for p in &placed {
+        self.reminder_dressing(t, &shape, &placed, &placed_roles, &mut extras, rem_x, f, [tr, tg, tb], acc, u)?;
+        for p in placed.iter().chain(extras.iter().map(|(_, p)| p)) {
             draw(p)?;
         }
 
@@ -1544,7 +2019,7 @@ impl Renderer {
             let t = self.factory.CreateWicBitmapRenderTarget(&bmp, &props)?;
             let m = RECT { left: 0, top: 0, right: w as i32, bottom: h as i32 };
             t.BeginDraw();
-            self.picture(&t, 0, m, f, &Matrix3x2::identity())?;
+            self.picture(&t, 0, m, f, &Matrix3x2::identity(), m)?;
             self.panel(&t, 0, m, f, st)?;
             t.EndDraw(None, None)?;
             let stream = wic.CreateStream()?;

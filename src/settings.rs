@@ -119,6 +119,9 @@ pub struct Settings {
     pub info_style: String,
     /// The date line: line (one line), hijri (Hijri date first), moon (moon phase) or short
     pub date_style: String,
+    // 1.5.0
+    /// How the reminder is laid out: classic, accent, frame, marks, chips, minimal, glass or side
+    pub reminder_style: String,
 }
 
 impl Default for Settings {
@@ -204,6 +207,7 @@ impl Default for Settings {
             clock_design: "classic".into(),
             info_style: "cards".into(),
             date_style: "line".into(),
+            reminder_style: "classic".into(),
         }
     }
 }

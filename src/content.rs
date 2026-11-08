@@ -6,28 +6,39 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// Text fields borrow straight from the library built into the exe (no copy in memory);
+/// only strings with escapes in the JSON become owned. (serde only borrows when the field is
+/// written as `Cow<'a, str>`, not through a type alias.)
+use std::borrow::Cow;
+
+pub type Item = Entry<'static>;
+
 #[derive(Deserialize, Clone)]
-pub struct Item {
-    pub kind: String,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub slot: String,
-    pub ar: String,
-    pub en: String,
-    #[serde(default)]
-    pub bn: String,
-    #[serde(rename = "ref")]
-    pub reference: String,
-    #[serde(default)]
-    pub grade: String,
+pub struct Entry<'a> {
+    #[serde(borrow)]
+    pub kind: Cow<'a, str>,
+    #[serde(default, borrow)]
+    pub tags: Vec<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    pub slot: Cow<'a, str>,
+    #[serde(borrow)]
+    pub ar: Cow<'a, str>,
+    #[serde(borrow)]
+    pub en: Cow<'a, str>,
+    #[serde(default, borrow)]
+    pub bn: Cow<'a, str>,
+    #[serde(rename = "ref", borrow)]
+    pub reference: Cow<'a, str>,
+    #[serde(default, borrow)]
+    pub grade: Cow<'a, str>,
     #[serde(default)]
     pub long: bool,
 }
 
 #[derive(Deserialize)]
-struct Library {
-    items: Vec<Item>,
+struct Library<'a> {
+    #[serde(borrow)]
+    items: Vec<Entry<'a>>,
 }
 
 /// Where in the day we are, as far as reminders care. Minutes are the city's local time.
@@ -94,7 +105,7 @@ impl Picker {
         let mut p = Picker::new();
         if let Some(saved) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<SavedDecks>(&s).ok()) {
             p.turn = saved.turn;
-            let by_ref: HashMap<&str, usize> = p.items.iter().enumerate().map(|(i, it)| (it.reference.as_str(), i)).collect();
+            let by_ref: HashMap<&str, usize> = p.items.iter().enumerate().map(|(i, it)| (it.reference.as_ref(), i)).collect();
             for (key, (refs, pos)) in saved.decks {
                 let idx: Vec<usize> = refs.iter().filter_map(|r| by_ref.get(r.as_str()).copied()).collect();
                 // a deck from an older library (items added or removed) is simply reshuffled
@@ -109,7 +120,7 @@ impl Picker {
 
     fn save(&self) {
         let Some(path) = &self.save_to else { return };
-        let decks = self.decks.iter().map(|(k, (idx, pos))| (k.clone(), (idx.iter().map(|&i| self.items[i].reference.clone()).collect(), *pos))).collect();
+        let decks = self.decks.iter().map(|(k, (idx, pos))| (k.clone(), (idx.iter().map(|&i| self.items[i].reference.to_string()).collect(), *pos))).collect();
         if let Ok(s) = serde_json::to_string(&SavedDecks { turn: self.turn, decks }) {
             let _ = std::fs::write(path, s);
         }
@@ -215,15 +226,15 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let kinds: Vec<String> = vec!["quran".into()];
         let mut first = Picker::saved(path.clone());
-        let a: Vec<String> = (0..3).map(|_| first.pick(None, &kinds, false).unwrap().1.reference).collect();
+        let a: Vec<String> = (0..3).map(|_| first.pick(None, &kinds, false).unwrap().1.reference.to_string()).collect();
         // "restart": a new picker reading the same file carries on with the next verses
         let mut second = Picker::saved(path.clone());
-        let b: Vec<String> = (0..3).map(|_| second.pick(None, &kinds, false).unwrap().1.reference).collect();
+        let b: Vec<String> = (0..3).map(|_| second.pick(None, &kinds, false).unwrap().1.reference.to_string()).collect();
         assert!(a.iter().all(|r| !b.contains(r)), "{a:?} repeated in {b:?}");
         // a full round shows every verse once before any repeats
         let mut fresh = Picker::new();
         let n = fresh.items.iter().filter(|i| i.kind == "quran").count();
-        let round: std::collections::HashSet<String> = (0..n).map(|_| fresh.pick(None, &kinds, false).unwrap().1.reference).collect();
+        let round: std::collections::HashSet<String> = (0..n).map(|_| fresh.pick(None, &kinds, false).unwrap().1.reference.to_string()).collect();
         assert_eq!(round.len(), n);
         let _ = std::fs::remove_file(&path);
     }
@@ -239,5 +250,16 @@ mod tests {
         let (m, it) = p.pick(Some("morning"), &kinds, false).unwrap();
         assert_eq!(m, "morning");
         assert_eq!(it.slot, "morning_evening");
+    }
+}
+
+#[cfg(test)]
+mod borrow_check {
+    #[test]
+    fn library_text_is_not_copied() {
+        let p = super::Picker::new();
+        let owned = p.items.iter().filter(|i| matches!(i.ar, std::borrow::Cow::Owned(_)) || matches!(i.en, std::borrow::Cow::Owned(_))).count();
+        // Text with escapes in the JSON (quotes, line breaks) has to be copied; the rest must not be.
+        assert!(owned * 2 < p.items.len(), "{owned} of {} items were copied", p.items.len());
     }
 }

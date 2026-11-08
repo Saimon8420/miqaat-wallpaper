@@ -41,6 +41,16 @@ const MR: f32 = 872.0; // page right
 const SECTIONS: [&str; 6] = ["Location & times", "Reminders", "Picture & light", "Design", "Fonts & language", "System"];
 const ROTATE: [(&str, &str); 3] = [("keep", "Keep"), ("daily", "Every day"), ("prayer", "Each prayer")];
 const KINDS: [(&str, &str); 6] = [("quran", "Quran"), ("hadith", "Hadith"), ("dua", "Dua"), ("dhikr", "Dhikr"), ("istighfar", "Istighfar"), ("durood", "Durood")];
+const REMINDER_STYLES: [(&str, &str); 8] = [
+    ("classic", "Classic"),
+    ("accent", "Accent line"),
+    ("frame", "Frame"),
+    ("marks", "Verse marks"),
+    ("chips", "Chips"),
+    ("minimal", "Minimal"),
+    ("glass", "Glass card"),
+    ("side", "Side by side"),
+];
 const SHOWS: [(&str, &str); 8] = [("show_next", "Next prayer"), ("show_reminder", "Reminder"), ("show_special", "Special day"), ("show_times", "Prayer row"), ("show_monitor", "System monitor"), ("show_fasting", "Fasting times"), ("show_qibla", "Qibla"), ("show_event", "Next event")];
 const DATEPARTS: [(&str, &str); 4] = [("show_weekday", "Weekday"), ("show_hijri", "Hijri date"), ("show_date", "Date"), ("show_city", "City")];
 const PRESETS: [&str; 5] = ["gold", "emerald", "sky", "rose", "pearl"];
@@ -110,6 +120,7 @@ fn rows() -> Vec<Row> {
         r(1, "", "Show", "Pick the kinds of reminders", "kinds", Ctl::Kinds),
         r(1, "", "Change every", "A new reminder fades in", "interval", seg(&[("5", "5m"), ("10", "10m"), ("15", "15m"), ("30", "30m"), ("60", "1h")])),
         r(1, "", "Meaning", "Shown under the Arabic", "meaning", seg(&[("en", "English"), ("bn", "বাংলা"), ("none", "Arabic only")])),
+        r(1, "", "Reminder style", "How the reminder sits on the wallpaper", "reminder_style", Ctl::Drop(REMINDER_STYLES.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect())),
         r(1, "Smart timing", "Follow the time of day", "Morning and evening adhkar, adhkar after salah, before sleep", "follow_time", Ctl::Switch),
         r(1, "Smart timing", "Special days", "White Days, Monday/Thursday fasts, Ashura, Arafah, Ramadan…", "special_days", Ctl::Switch),
         r(2, "", "Picture", "One of 20 places, or your own photo", "scene", Ctl::Pictures),
@@ -2278,6 +2289,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 let _ = DeleteObject(ui.edit_brush.into());
                 let _ = ui.dw.UnregisterFontFileLoader(&ui.loader);
             }
+            crate::release_memory();
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
