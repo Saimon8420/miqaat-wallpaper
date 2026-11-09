@@ -449,10 +449,23 @@ impl Renderer {
 
     /// Lays out `text` in a box `width` wide. `align`: 0 left, 1 centre, 2 right (on screen).
     fn piece(&self, text: &str, f: &IDWriteTextFormat, width: f32, align: u8, spacing: f32, color: D2D1_COLOR_F) -> Result<Piece> {
+        self.make_piece(text, f, width, align, spacing, color, true)
+    }
+
+    /// A piece of its own, never shared: for layouts that are changed afterwards (bold hours,
+    /// equal-width digits, trimming), so the change can't leak into another paint.
+    fn fresh_piece(&self, text: &str, f: &IDWriteTextFormat, width: f32, align: u8, spacing: f32, color: D2D1_COLOR_F) -> Result<Piece> {
+        self.make_piece(text, f, width, align, spacing, color, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_piece(&self, text: &str, f: &IDWriteTextFormat, width: f32, align: u8, spacing: f32, color: D2D1_COLOR_F, shared: bool) -> Result<Piece> {
         let key: LayoutKey = (text.to_string(), f.as_raw() as usize, width.max(1.0).to_bits(), align, spacing.to_bits());
-        self.used_layouts.borrow_mut().insert(key.clone());
-        if let Some((l, h)) = self.layouts.borrow().get(&key) {
-            return Ok(Piece { layout: l.clone(), x: 0.0, y: 0.0, w: width, h: *h, color });
+        if shared {
+            self.used_layouts.borrow_mut().insert(key.clone());
+            if let Some((l, h)) = self.layouts.borrow().get(&key) {
+                return Ok(Piece { layout: l.clone(), x: 0.0, y: 0.0, w: width, h: *h, color });
+            }
         }
         unsafe {
             let rtl = f.GetReadingDirection() == DWRITE_READING_DIRECTION_RIGHT_TO_LEFT;
@@ -469,7 +482,9 @@ impl Renderer {
             }
             let mut m = DWRITE_TEXT_METRICS::default();
             l.GetMetrics(&mut m)?;
-            self.layouts.borrow_mut().insert(key, (l.clone(), m.height));
+            if shared {
+                self.layouts.borrow_mut().insert(key, (l.clone(), m.height));
+            }
             Ok(Piece { layout: l, x: 0.0, y: 0.0, w: width, h: m.height, color })
         }
     }
@@ -498,12 +513,12 @@ impl Renderer {
             let f = self.format_wrap(which, s, weight, false, false)?;
             let mut widest = 0.0f32;
             for d in ['0', '8'] {
-                let p = self.piece(&swap(d), &f, width, align, 0.0, color)?;
+                let p = self.fresh_piece(&swap(d), &f, width, align, 0.0, color)?;
                 tnum(&p, n)?;
                 widest = widest.max(self.width(&p)?);
             }
             if widest <= width || s <= size * 0.5 {
-                let p = self.piece(text, &f, width, align, 0.0, color)?;
+                let p = self.fresh_piece(text, &f, width, align, 0.0, color)?;
                 tnum(&p, n)?;
                 return Ok((p, widest));
             }
@@ -513,7 +528,7 @@ impl Renderer {
 
     /// An empty piece that only keeps a place in the layout.
     fn blank(&self, h: f32, w: f32) -> Result<Piece> {
-        let mut p = self.piece("", &self.format('e', 12.0, DWRITE_FONT_WEIGHT_NORMAL, false)?, w, 0, 0.0, rgba(0.0, 0.0, 0.0, 0.0))?;
+        let mut p = self.fresh_piece("", &self.format('e', 12.0, DWRITE_FONT_WEIGHT_NORMAL, false)?, w, 0, 0.0, rgba(0.0, 0.0, 0.0, 0.0))?;
         p.h = h;
         Ok(p)
     }
@@ -522,7 +537,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     fn label_piece(&self, text: &str, which: char, size: f32, weight: DWRITE_FONT_WEIGHT, rtl: bool, align: u8, width: f32, color: D2D1_COLOR_F) -> Result<Piece> {
         let fmt = self.format_wrap(which, size, weight, rtl, false)?;
-        let p = self.piece(text, &fmt, width.max(1.0), align, 0.0, color)?;
+        let p = self.fresh_piece(text, &fmt, width.max(1.0), align, 0.0, color)?;
         unsafe {
             let ty = self.dwrite.CreateTypography()?;
             ty.AddFontFeature(DWRITE_FONT_FEATURE { nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, parameter: 1 })?;
@@ -1071,6 +1086,7 @@ impl Renderer {
                 return Ok(p);
             }
             if s <= size * 0.6 {
+                let p = self.fresh_piece(text, &self.format(which, s, weight, rtl)?, width, align, 0.0, color)?;
                 unsafe {
                     p.layout.SetMaxHeight(max_h)?;
                     let sign = self.dwrite.CreateEllipsisTrimmingSign(&p.layout)?;
@@ -1224,9 +1240,10 @@ impl Renderer {
         let cw = col_r - col_l;
 
         // In the bar the screen is split in three: clock | reminder | prayer row.
-        let (clock_x, clock_w) = if bar { (col_l, cw * 0.25) } else { (col_l, cw) };
-        let (rem_x, rem_w) = if bar { (col_l + cw * 0.28, cw * 0.4) } else { (col_l, cw) };
-        let (row_x, row_w) = if bar { (col_l + cw * 0.71, cw * 0.29) } else { (col_l, cw) };
+        // Glass cards add padding around each column, so they need wider gutters.
+        let (clock_x, clock_w) = if bar { (col_l, cw * 0.24) } else { (col_l, cw) };
+        let (rem_x, rem_w) = if bar { (col_l + cw * 0.29, cw * 0.39) } else { (col_l, cw) };
+        let (row_x, row_w) = if bar { (col_l + cw * 0.73, cw * 0.27) } else { (col_l, cw) };
 
         // ---- clock group ----
         let clock_font = 'c';
@@ -1248,7 +1265,13 @@ impl Renderer {
         let secs = f.seconds.as_ref().map(|s| s.trim_start_matches(':').to_string());
         let bold = if design == "split" { hours.encode_utf16().count() } else { 0 };
         // Arabic-Indic digits have no tabular feature in every font; the fixed size still holds.
-        let (clock_piece, clock_full_w) = self.clock_line(&clock_text, clock_font, clock_size, clock_weight, clock_w, align, white, bold)?;
+        // Right-aligned, the am/pm sits after the clock, so the clock leaves room for it.
+        let ampm_room = if align == 2 && !f.ampm.is_empty() {
+            self.width(&self.piece(&f.ampm, &self.format(label, clock_size * 0.17, DWRITE_FONT_WEIGHT_LIGHT, false)?, 8.0 * u, 0, 0.0, soft)?)? + 0.9 * u
+        } else {
+            0.0
+        };
+        let (clock_piece, clock_full_w) = self.clock_line(&clock_text, clock_font, clock_size, clock_weight, clock_w - ampm_room, align, white, bold)?;
         let art = if st.show_clock && matches!(design, "stack" | "tiles" | "pill" | "dial") {
             Some(self.clock_art(design, &hours, &minutes, secs.as_deref(), &f.ampm, f.time, clock_size, clock_weight, clock_w, [tr, tg, tb], acc, u)?)
         } else {
@@ -1475,13 +1498,15 @@ impl Renderer {
         // ---- vertical placement ----
         let mut y = bottom;
         let mut strip_y = y - strip_h;
+        // the bar's glass cards sit above the strip's own card, with a gap between
+        let strip_gap = if bar && st.behind == "glass" { 4.4 * u } else { 1.4 * u };
         if strip_h > 0.0 {
-            y = strip_y - 1.4 * u;
+            y = strip_y - strip_gap;
         }
         let mut row_y = y - row_h;
         let mut rem_bottom = if bar { y } else if row_h > 0.0 { row_y - 1.6 * u } else { y };
         if bar && strip_h > 0.0 {
-            rem_bottom = strip_y - 1.4 * u;
+            rem_bottom = strip_y - strip_gap;
         }
         let mut yy = rem_bottom;
         let mut placed: Vec<Piece> = vec![];
@@ -1558,9 +1583,16 @@ impl Renderer {
                         lower.push(&filler);
                     }
                     if bar {
-                        // one card per column in the bar
-                        for p in lower {
-                            boxes.push(rect(p.x - pad, p.y - pad, p.x + p.w + pad, p.y + p.h + pad));
+                        // one card per column in the bar: the reminder, the prayer times, and the
+                        // system strip across the whole width underneath
+                        if let Some(r) = bounds(&placed.iter().collect::<Vec<_>>(), pad) {
+                            boxes.push(r);
+                        }
+                        if row_h > 0.0 {
+                            boxes.push(rect(row_x - pad, row_y - pad, row_x + row_w + pad, row_y + row_h + pad));
+                        }
+                        if strip_h > 0.0 {
+                            boxes.push(rect(col_l - pad, strip_y - pad * 0.6, col_l + cw + pad, strip_y + strip_h + pad * 0.4));
                         }
                     } else if let Some(r) = bounds(&lower, pad) {
                         boxes.push(r);
