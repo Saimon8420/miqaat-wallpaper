@@ -14,7 +14,7 @@ import subprocess
 import sys
 import urllib.request
 
-from refs import ADHKAR_CHAPTERS, ADHKAR_MORE, HADITH, QURAN, QURAN_DHIKR, QURAN_DUAS, QURAN_MORE
+from refs import ADHKAR_CHAPTERS, ADHKAR_MORE, HADITH, QURAN, QURAN_DHIKR, QURAN_DUAS, QURAN_ISTIGHFAR, QURAN_MORE
 
 ROOT = pathlib.Path(__file__).resolve().parent
 RAW = ROOT / "raw"
@@ -46,7 +46,9 @@ def quran():
     seen = {(s, a) for s, a, _, _ in QURAN}
     more = [(s, a, b, []) for s, a, b in QURAN_MORE if (s, a) not in seen and not seen.add((s, a))]
     seen_d = set()
-    duas = [(s, a, b, ["dua"]) for s, a, b in QURAN_DUAS if (s, a) not in seen_d and not seen_d.add((s, a))]
+    istighfar = {(s, a) for s, a, _ in QURAN_ISTIGHFAR}
+    duas = [(s, a, b, ["istighfar"]) for s, a, b in QURAN_ISTIGHFAR if (s, a) not in seen_d and not seen_d.add((s, a))]
+    duas += [(s, a, b, ["dua"]) for s, a, b in QURAN_DUAS if (s, a) not in seen_d and not seen_d.add((s, a))]
     duas += [(s, a, b, ["dhikr"]) for s, a, b in QURAN_DHIKR if (s, a) not in seen_d and not seen_d.add((s, a))]
     # a verse that is now a dua or dhikr isn't also kept as a plain verse
     dua_keys = {(s, a) for s, a, _, _ in duas}
@@ -62,7 +64,7 @@ def quran():
         bn = " ".join(clean(v["bn"]) for v in d["verses"])
         ref = f"{d['surahEn']} {s}:{a}" + (f"–{b}" if b > a else "")
         is_dua = (s, a) in dua_keys
-        kind = ("dhikr" if "dhikr" in tags else "dua") if is_dua else "quran"
+        kind = ("istighfar" if (s, a) in istighfar else "dhikr" if "dhikr" in tags else "dua") if is_dua else "quran"
         item = {"kind": kind, "tags": tags, "ar": ar, "en": en, "bn": bn, "ref": ref}
         if is_dua:
             item["slot"] = kind
@@ -246,7 +248,9 @@ def adhkar():
             meaning = english(e.get("TRANSLATED_TEXT", ""))
             if len(meaning) < 8 or meaning.startswith(("i.e.", "Note:")):  # no translation, only a note
                 continue
-            if re.match(r"(?i)\W*(\w+ )?(\w+ )?(reported|narrated)", meaning[:60]):  # a story about a dhikr, not words to say
+            if re.match(r"(?i)\W*([\w']+ ){0,4}(related|reported|narrated|said:|said that|used to say)", meaning[:90]):  # a story about a dhikr, not words to say
+                continue
+            if int(r["ID"]) in (110, 234, 238, 239, 242):  # describes what the Prophet ﷺ did; no words to say
                 continue
             kind = {"istighfar": "istighfar", "durood": "durood", "dhikr": "dhikr"}.get(slot, "dua")
             # words of dhikr filed under a dua chapter are dhikr
