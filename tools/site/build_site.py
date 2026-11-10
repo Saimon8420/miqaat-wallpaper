@@ -36,19 +36,19 @@ ed("const SCENES={{SCENES}};", "const SCENES=" + json.dumps(out, ensure_ascii=Fa
 
 ed("<title>Proposal · Miqaat Live Wallpaper</title>",
    '<title>Miqaat Wallpaper · a calm prayer-time wallpaper for Windows</title>\n'
-   '<meta name="description" content="Free live wallpaper for Windows: prayer times, the next prayer, and one authentic reminder at a time with its source. Written in Rust, about 30 MB of memory.">\n'
+   '<meta name="description" content="Free live wallpaper for Windows: prayer times, the next prayer, and one authentic reminder at a time with its source. Written in Rust, about 21 MB of memory.">\n'
    '<link rel="icon" href="icon.png">')
 ed('<span class="eyebrow">Proposal · Desktop</span>', '<span class="eyebrow">Free · Windows 10 &amp; 11</span>')
 ed("<h1>Miqaat Live Wallpaper.<br>", "<h1>Miqaat Wallpaper.<br>")
 ed('Written in Rust to use almost no memory.</p>',
-   'Written in Rust; about 30 MB of memory.</p>\n'
+   'Written in Rust; about 21 MB of memory.</p>\n'
    f'  <div class="cta"><a class="dl" href="{DL}">Download for Windows<span>MiqaatWallpaper-Setup.exe · 37 MB</span></a>'
    f'<a class="gh" href="{GH}">Source on GitHub</a><a class="gh" href="#install">How to install</a></div>')
 ed("The settings above are live in this preview: city, method, Asr time and Hijri date fetch real times from the Miqaat API.",
    "This page is a live preview of the app: city, method, Asr time and Hijri date fetch real times from the Miqaat API. The real wallpaper draws the same thing natively, behind your desktop icons.")
 ed('<div class="cell b4"><div class="core"><span class="tag">Memory</span><div class="big">15–35<small> MB</small></div><p style="margin-top:10px">Target in Rust.',
-   '<div class="cell b4"><div class="core"><span class="tag">Memory</span><div class="big">~30<small> MB</small></div><p style="margin-top:10px">Measured on a two-monitor 1080p desktop.')
-ed('<div class="me">Rust (chosen)<span>~25 MB</span>', '<div class="me">Rust (this app)<span>~30 MB</span>')
+   '<div class="cell b4"><div class="core"><span class="tag">Memory</span><div class="big">~21<small> MB</small></div><p style="margin-top:10px">Measured on a two-monitor 1080p desktop.')
+ed('<div class="me">Rust (chosen)<span>~25 MB</span>', '<div class="me">Rust (this app)<span>~21 MB</span>')
 ed("No text will be typed from memory. The Quran comes from the Tanzil verified Uthmani text; hadith only from collections with their grading shown; adhkar from Hisn al-Muslim with references. Days whose special worship is disputed are not presented as worship days. Each dataset's licence is checked before use.",
    "No text was typed from memory: every word is pulled from published datasets by a build script, and only the references were chosen by hand. Hadith come only from collections with their grading shown; adhkar from Hisn al-Muslim with item numbers. Days whose special worship is disputed are not presented as worship days.")
 ed("<li><b>Quran:</b> the same source as your al-kitab app: the <i>holy-quran</i> library (MIT), Hafs text with English (Sahih International) and Bangla translations, all 6,236 verses</li>",
@@ -86,6 +86,19 @@ for cid, _ in CLOCKS:
                         "--set", "layout=column", "--set", "side=left", "--set", f"clock_design={cid}", "--set", "info_style=cards"], check=True)
         Image.open(png).convert("RGB").crop((0, 0, 800, 450)).resize((640, 360), Image.LANCZOS).save(DOCS / f"calligraphy/clock-{cid}.jpg", "JPEG", quality=82, optimize=True, progressive=True)
         png.unlink()
+# Reminder styles, rendered the same way (crop: the reminder in the right-hand column).
+REMINDERS = [("classic", "Classic"), ("accent", "Accent line"), ("frame", "Frame"), ("marks", "Verse marks"),
+             ("chips", "Chips"), ("minimal", "Minimal"), ("glass", "Glass card"), ("side", "Side by side")]
+for rid, _ in REMINDERS:
+    png = DOCS / f"calligraphy/reminder-{rid}.png"
+    if EXE.exists():
+        subprocess.run([str(EXE), "--snapshot", str(png), "--size", "1600x900", "--at", "21:30", "--set", "scene=cal:night-caravan",
+                        "--set", "rotate=keep", "--set", "seconds=false", "--set", "show_monitor=false", "--set", "lang=en",
+                        "--set", "layout=column", "--set", "side=right", "--set", "follow_time=false", "--set", "special_days=false", "--set", "show_times=false",
+                        "--set", "kinds=[\"dhikr\"]", "--set", f"reminder_style={rid}"], check=True)
+        Image.open(png).convert("RGB").crop((960, 540, 1600, 900)).save(DOCS / f"calligraphy/reminder-{rid}.jpg", "JPEG", quality=84, optimize=True, progressive=True)
+        png.unlink()
+reminders = "".join(f'<figure><img src="calligraphy/reminder-{rid}.jpg" alt="{name} reminder style" loading="lazy"><figcaption>{name}</figcaption></figure>' for rid, name in REMINDERS)
 clocks = "".join(f'<figure><img src="calligraphy/clock-{cid}.jpg" alt="{name} clock" loading="lazy"><figcaption>{name}</figcaption></figure>' for cid, name in CLOCKS)
 gallery = "".join(f'<figure><img src="calligraphy/{sid}.jpg" alt="{name}" loading="lazy"><figcaption>{name}</figcaption></figure>' for sid, name in GALLERY)
 
@@ -104,6 +117,10 @@ ed("""        <li>Turn it off and the wallpaper goes back to updating once a min
         <li>The Qibla direction for your city, and the days left until Ramadan and the two Eids</li>
         <li>A quiet notification a few minutes before each prayer, and before Jumu'ah</li>
         <li>69 fonts in Arabic, Bangla and English, and 18 ways to style the clock, date, text and cards</li></ul></div></div>
+      <div class="cell b6"><div class="core"><span class="tag">Reminder</span><h3>Eight reminder styles</h3><ul>
+        <li>Classic, accent line, frame, verse marks, chips, minimal, glass card, or side by side</li>
+        <li>871 reminders: 340 Quran verses, 215 duas, 64 dhikr, 224 hadith, 21 istighfar and durood, all with Bangla</li>
+        <li>About 21 MB of memory, and no redrawing while a window covers the wallpaper</li></ul></div></div>
       <div class="cell b6"><div class="core"><span class="tag">Clock</span><h3>Six designs, or none</h3><ul>
         <li>Classic, bold hours, stacked, flip tiles, a pill with a seconds ring, or an analog dial</li>
         <li>Turn the clock off and the next prayer becomes the headline</li>
@@ -134,6 +151,11 @@ gallery_section = f'''  <section id="calligraphy">
     <span class="eyebrow">Calligraphy</span>
     <h2>Scenes the app draws itself.</h2>
     <div class="gal">{gallery}</div>
+  </section>
+  <section id="reminders">
+    <span class="eyebrow">Reminder</span>
+    <h2>Eight ways to show the reminder.</h2>
+    <div class="gal">{reminders}</div>
   </section>
   <section id="clocks">
     <span class="eyebrow">Clock</span>
